@@ -1,21 +1,17 @@
 from CFD_2D_TDJ import *
 
 
-# Create field
-n_bits = 4
-N = 2**n_bits
-L = 1
-chi = 16
-chi_mpo = chi
-
-# Set timesteps
-dt = 0.1*2**-(n_bits-1)
-T = 2
-
-# Set penalty factor for breach of incompressibility condition
-dx = 1 / (2**n_bits - 1)
-mu = 2.5 * 10**5
-Re = 0.001*200*1e3
+# Set parameters
+n_bits = 4                  # number of bits per spatial dimension
+N = 2**n_bits               # number of gridpoints per spatial dimension
+L = 1                       # length of simulation area
+chi = 16                    # maximum bond dimension for mps
+chi_mpo = chi               # maximum bond dimension for mpos
+dt = 0.1*2**-(n_bits-1)     # time step
+T = 2                       # final time
+dx = 1 / (2**n_bits - 1)    # spacing between grid points
+mu = 2.5 * 10**5            # penalty factor
+Re = 0.001*200*1e3          # Reynolds number
 # Re = 200*1e3
 
 
