@@ -4,6 +4,7 @@ from scipy.sparse.linalg import svds as truncated_svd
 from scipy.linalg import svd as plain_svd
 from scipy.sparse.linalg import cg
 import quimb as qu
+import sys
 import matplotlib.pyplot as plt
 from differential_mpo import *
 from differential_operators_numpy import *
@@ -291,7 +292,7 @@ def get_precontracted_LR_mps_mps(mps_2, mps_1, center=0):
             A = mps_1[0].copy(deep=True)
             B = mps_2[0].copy(deep=True)
             F = F.copy(deep=True)
-
+            
             tn = A | F
             qu.tensor.connect(A, F, 0, 0)   # connect the right bond of A with the upper one of F
             AF = tn ^ ...
@@ -848,9 +849,9 @@ def single_time_step(U, V, Ax_MPS, Ay_MPS, Bx_MPS, By_MPS, chi_mpo, dt, Re, mu, 
             x_2.reindex({x_2.inds[0]: 'l', x_2.inds[1]: 'r', x_2.inds[2]: 'p'}, inplace=True).transpose('l', 'p', 'r', inplace=True)
 
             # U_new, V_new = solve_LS_cg_scipy(H_11, H_12, H_22, x_1, x_2, b_1, b_2)    # solve via scipy.cg
-            U_new, V_new = solve_LS_cg(H_11, H_12, H_22, x_1, x_2, b_1, b_2)            # solve via self implemented conjugate gradient
-            # U_new, V_new = solve_LS_inv(H_11, H_12, H_22, b_1, b_2)                   # solve via matrix inversion
-            
+            # U_new, V_new = solve_LS_cg(H_11, H_12, H_22, x_1, x_2, b_1, b_2)            # solve via self implemented conjugate gradient
+            U_new, V_new = solve_LS_inv(H_11, H_12, H_22, b_1, b_2)                   # solve via matrix inversion
+
             # update MPSs and precontracted networks
             # update MPS
             shape = U_trial[i].shape
@@ -1080,7 +1081,7 @@ def time_evolution(U, V, chi, chi_mpo, dt, T, Re, mu, save_path):
     for step in range(n_steps):   # for every time step dt
         print(f"Step = {step} - Time = {t}", end='\n')
         if step%20 == 0:
-            plot(U, V, time=t, save_path=f"{save_path}/step_{step}.png", show=False)
+            #plot(U, V, time=t, save_path=f"{save_path}/step_{step}.png", show=False)
             np.save(f"{save_path}/u_step_{step}.npy", U.arrays)
             np.save(f"{save_path}/v_step_{step}.npy", V.arrays)
 
