@@ -17,7 +17,7 @@ Re = 0.001*200*1e3          # Reynolds number
 
 def main():
     U_MPS, V_MPS, U_arrays, V_arrays = build_initial_fields(n_bits, L, chi)
-    time_evolution(U_MPS, V_MPS, chi, chi_mpo, dt, T, Re, mu, '/Users/q556220/dev/TN_CFD/2D_TDJ/data')
+    time_evolution(U_MPS, V_MPS, chi, chi_mpo, dt, T, Re, mu, '/Users/q556220/dev/TN_CFD/2D_TDJ/quimb/data')
 
 if __name__ == "__main__":
     main()

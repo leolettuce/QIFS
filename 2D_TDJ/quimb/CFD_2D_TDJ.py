@@ -1081,9 +1081,9 @@ def time_evolution(U, V, chi, chi_mpo, dt, T, Re, mu, save_path):
     for step in range(n_steps):   # for every time step dt
         print(f"Step = {step} - Time = {t}", end='\n')
         if step%20 == 0:
-            #plot(U, V, time=t, save_path=f"{save_path}/step_{step}.png", show=False)
-            np.save(f"{save_path}/u_step_{step}.npy", U.arrays)
-            np.save(f"{save_path}/v_step_{step}.npy", V.arrays)
+            plot(U, V, time=t, save_path=f"{save_path}/step_{step}.png", show=False)
+            np.save(f"{save_path}/u_step_{step}.npy", np.array(U.arrays, dtype=object))
+            np.save(f"{save_path}/v_step_{step}.npy", np.array(V.arrays, dtype=object))
 
         U_trial = copy_mps(U)          # trial velocity state
         V_trial = copy_mps(V)          # trial velocity state
@@ -1107,8 +1107,8 @@ def time_evolution(U, V, chi, chi_mpo, dt, T, Re, mu, save_path):
         t += dt
     
     plot(U, V, time=t, save_path=f"{save_path}/final.png", show=False)
-    np.save(f"{save_path}/u_final.npy", U.arrays)
-    np.save(f"{save_path}/v_final.npy", V.arrays)
+    np.save(f"{save_path}/u_final.npy", np.array(U.arrays, dtype=object))
+    np.save(f"{save_path}/v_final.npy", np.array(V.arrays, dtype=object))
         
 
 

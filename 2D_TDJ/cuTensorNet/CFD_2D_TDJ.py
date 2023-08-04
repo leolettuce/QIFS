@@ -828,7 +828,7 @@ def time_evolution(U, V, chi, chi_mpo, dt, T, Re, mu, save_path, options=None):
     t = 0
     for step in range(n_steps):   # for every time step dt
         print(f"Step = {step} - Time = {t}", end='\n')
-        # if step%20 == 0:
+        if step%20 == 0:
             plot(U, V, time=t, save_path=f"{save_path}/step_{step}.png", show=False)
             #np.save(f"{save_path}/u_step_{step}.npy", np.array(U, dtype=object))
             #np.save(f"{save_path}/v_step_{step}.npy", np.array(V, dtype=object))
@@ -843,7 +843,7 @@ def time_evolution(U, V, chi, chi_mpo, dt, T, Re, mu, save_path, options=None):
         V_prev_copy = V.copy()          # previous velocity state
         
         # Midpoint RK-2 step
-        # U_mid, V_mid = single_time_step(U_trial, V_trial, U_prev, V_prev, U_prev, V_prev, chi_mpo, dt/2, Re, mu, d1x, d1y, d2x, d2y, d1x_d1x, d1x_d1y, d1y_d1y, U_d1x_d1x_U_left, U_d1x_d1x_U_right, U_d1x_d1y_V_left, U_d1x_d1y_V_right, V_d1y_d1y_V_left, V_d1y_d1y_V_right)
+        # U_mid, V_mid = single_time_step(U_trial, V_trial, U_prev, V_prev, U_prev_copy, V_prev_copy, chi_mpo, dt/2, Re, mu, d1x, d1y, d2x, d2y, d1x_d1x, d1x_d1y, d1y_d1y, U_d1x_d1x_U_left, U_d1x_d1x_U_right, U_d1x_d1y_V_left, U_d1x_d1y_V_right, V_d1y_d1y_V_left, V_d1y_d1y_V_right)
         # Full RK-2 step
         print('')
         # U, V = single_time_step(U_trial, V_trial, U_prev, V_prev, U_mid, V_mid, chi_mpo, dt, Re, mu, d1x, d1y, d2x, d2y, d1x_d1x, d1x_d1y, d1y_d1y, U_d1x_d1x_U_left, U_d1x_d1x_U_right, U_d1x_d1y_V_left, U_d1x_d1y_V_right, V_d1y_d1y_V_left, V_d1y_d1y_V_right)
