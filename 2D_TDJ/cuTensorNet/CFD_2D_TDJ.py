@@ -564,7 +564,7 @@ def single_time_step(U, V, Ax_MPS, Ay_MPS, Bx_MPS, By_MPS, chi_mpo, dt, Re, mu, 
     d1xBx = multiply_mpo_mpo(d1x, Bx_MPO, mult_algorithm, options)
     By_MPO = hadamard_product_MPO(By_MPS, options)
     Byd1y = multiply_mpo_mpo(By_MPO, d1y, mult_algorithm, options)
-    d1yBy = multiply_mpo_mpo(d1y, Bx_MPO, mult_algorithm, options)
+    d1yBy = multiply_mpo_mpo(d1y, By_MPO, mult_algorithm, options)
 
     # convection-diffusion terms for x direction (prefactors not included)
     U_d2x_Bx_left, U_d2x_Bx_right = get_precontracted_LR_mps_mpo(U, d2x, Bx_MPS, 0)
@@ -600,7 +600,7 @@ def single_time_step(U, V, Ax_MPS, Ay_MPS, Bx_MPS, By_MPS, chi_mpo, dt, Re, mu, 
         right_tn = right_tn.copy()
         W_t = W_t.copy()
 
-        return mu*dt**2 * contract('umd, mpeP, reD->uprdPD', left_tn, W_t, right_tn, options=options)
+        return mu*dt**2 * contract('umd, mpeP, reD->dPDupr', left_tn, W_t, right_tn, options=options)
     
     run = 0
     while np.abs((E_1-E_0)/E_0) > epsilon:      # do until the state does not change anymore
@@ -647,8 +647,8 @@ def single_time_step(U, V, Ax_MPS, Ay_MPS, Bx_MPS, By_MPS, chi_mpo, dt, Re, mu, 
             x_2 = V[i].copy()
 
             # U_new, V_new = solve_LS_cg_scipy(H_11, H_12, H_22, x_1, x_2, b_1, b_2)    # solve via scipy.cg
-            U_new, V_new = solve_LS_cg(H_11, H_12, H_22, x_1, x_2, b_1, b_2)            # solve via self implemented conjugate gradient
-            # U_new, V_new = solve_LS_inv(H_11, H_12, H_22, b_1, b_2)                   # solve via matrix inversion
+            # U_new, V_new = solve_LS_cg(H_11, H_12, H_22, x_1, x_2, b_1, b_2)            # solve via self implemented conjugate gradient
+            U_new, V_new = solve_LS_inv(H_11, H_12, H_22, b_1, b_2)                   # solve via matrix inversion
 
             # update MPSs and precontracted networks
             # update MPS
@@ -722,8 +722,8 @@ def single_time_step(U, V, Ax_MPS, Ay_MPS, Bx_MPS, By_MPS, chi_mpo, dt, Re, mu, 
             x_2 = V[i].copy()
 
             # U_new, V_new = solve_LS_cg_scipy(H_11, H_12, H_22, x_1, x_2, b_1, b_2)    # solve via scipy.cg
-            U_new, V_new = solve_LS_cg(H_11, H_12, H_22, x_1, x_2, b_1, b_2)            # solve via self implemented conjugate gradient
-            # U_new, V_new = solve_LS_inv(H_11, H_12, H_22, b_1, b_2)                   # solve via matrix inversion
+            # U_new, V_new = solve_LS_cg(H_11, H_12, H_22, x_1, x_2, b_1, b_2)            # solve via self implemented conjugate gradient
+            U_new, V_new = solve_LS_inv(H_11, H_12, H_22, b_1, b_2)                   # solve via matrix inversion
 
             # update MPSs and precontracted networks
             # update MPS
