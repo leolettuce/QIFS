@@ -435,7 +435,7 @@ def Hx(H, x, options=None):
     # gives tensor corresponding to H*x
     H = H.copy()
     x = x.copy()
-    Hx = contract('apbcPd, apb->cPd', H, x, options=options)
+    Hx = contract('apbcPd, cPd->apb', H, x, options=options)
 
     return Hx 
 
@@ -489,7 +489,7 @@ def solve_LS_cg(H_11, H_12, H_22, x_1, x_2, b_1, b_2, options=None):
         x_2 = x_2 + alpha * p_2
 
         r_new_1, r_new_2 = b_Ax(H_11, H_12, H_22, x_1, x_2, b_1, b_2, options)
-        r_new_r_new = contract('apb, apb->', r_new_1, r_new_2, options=options) + contract('apb, apb->', r_new_2,  r_new_2, options=options)
+        r_new_r_new = contract('apb, apb->', r_new_1, r_new_1, options=options) + contract('apb, apb->', r_new_2,  r_new_2, options=options)
         beta = r_new_r_new / r_r
 
         p_1 = r_new_1 + beta * p_1

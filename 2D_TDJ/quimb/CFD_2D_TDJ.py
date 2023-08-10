@@ -848,6 +848,23 @@ def single_time_step(U, V, Ax_MPS, Ay_MPS, Bx_MPS, By_MPS, chi_mpo, dt, Re, mu, 
             x_1.reindex({x_1.inds[0]: 'l', x_1.inds[1]: 'r', x_1.inds[2]: 'p'}, inplace=True).transpose('l', 'p', 'r', inplace=True)
             x_2.reindex({x_2.inds[0]: 'l', x_2.inds[1]: 'r', x_2.inds[2]: 'p'}, inplace=True).transpose('l', 'p', 'r', inplace=True)
 
+            np.save("H_11.npy", H_11.data)
+            print(H_11.inds)
+            np.save("H_12.npy", H_12.data)
+            print(H_12.inds)
+            np.save("H_22.npy", H_22.data)
+            print(H_22.inds)
+            np.save("b_1.npy", b_1.data)
+            print(b_1.inds)
+            np.save("b_2.npy", b_2.data)
+            print(b_2.inds)
+            np.save("x_1.npy", x_1.data)
+            print(x_1.inds)
+            np.save("x_2.npy", x_2.data)
+            print(x_2.inds)
+            sys.exit()
+            # np.save(".H_11.npy", np.array(V.arrays, dtype=object))
+
             # U_new, V_new = solve_LS_cg_scipy(H_11, H_12, H_22, x_1, x_2, b_1, b_2)    # solve via scipy.cg
             # U_new, V_new = solve_LS_cg(H_11, H_12, H_22, x_1, x_2, b_1, b_2)            # solve via self implemented conjugate gradient
             U_new, V_new = solve_LS_inv(H_11, H_12, H_22, b_1, b_2)                   # solve via matrix inversion
