@@ -1,4 +1,4 @@
-from CFD_2D_TDJ import *
+from CFD_2D_TDJ_reuse_network import *
 
 
 # Create field
@@ -6,11 +6,11 @@ n_bits = 4
 N = 2**n_bits
 L = 1
 chi = 16
-chi_mpo = chi
+chi_mpo = 16
 
 # Set timesteps
 dt = 0.1*2**-(n_bits-1)
-T = 2
+T = 0.5
 
 # Set penalty factor for breach of incompressibility condition
 dx = 1 / (2**n_bits - 1)
@@ -18,10 +18,15 @@ mu = 2.5 * 10**5
 Re = 0.001*200*1e3
 # Re = 200*1e3
 
+# Path for saving images
+path = '/home/q541472/dev/TN_CFD/2D_TDJ/cuTensorNet/data'
+
+# Linear system solver ("cg", "inv", "scipy.cg")
+solver = "cg"
 
 def main():
     U_MPS, V_MPS, U_arrays, V_arrays = build_initial_fields(n_bits, L, chi)
-    time_evolution(U_MPS, V_MPS, chi, chi_mpo, dt, T, Re, mu, '/home/q541472/dev/cuTensorNet/data')
+    time_evolution(U_MPS, V_MPS, chi_mpo, dt, T, Re, mu, path, options, solver=solver)
 
 if __name__ == "__main__":
     main()
