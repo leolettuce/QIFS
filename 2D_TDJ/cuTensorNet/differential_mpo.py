@@ -29,7 +29,7 @@ def Diff_1_2_y_MPO(n, dx, options=None):
     central_node[0, 1, 2, 0] = 1    # 01 -> 00 no carry (0)
     central_node[2, 2, 2, 3] = 1    # 10 -> 11 carry for substraction (2)
     central_node[0, 3, 2, 2] = 1    # 11 -> 10 no carry(0)
-    right_terminator = 1/dx*cp.array([0, 1/2, -1/2], dtype='float64').reshape(3, 1) # coefficients
+    right_terminator = 1/dx*cp.array([0, -1/2, 1/2], dtype='float64').reshape(3, 1) # coefficients
 
     # Define arrays for MPO
     left_node = contract('ab, burd->aurd', left_terminator, central_node, options=options)
@@ -62,7 +62,7 @@ def Diff_1_2_x_MPO(n, dx, options=None):
     central_node[2, 1, 2, 3] = 1    # 01 -> 11 carry for substraction (2)
     central_node[0, 2, 2, 0] = 1    # 10 -> 00 no carry (0)
     central_node[0, 3, 2, 1] = 1    # 11 -> 01 no carry (0)
-    right_terminator = 1/dx*cp.array([0, 1/2, -1/2], dtype='float64').reshape(3, 1) # coefficients
+    right_terminator = 1/dx*cp.array([0, -1/2, 1/2], dtype='float64').reshape(3, 1) # coefficients
 
     # Define arrays for MPO
     left_node = contract('ab, burd->aurd', left_terminator, central_node, options=options)
@@ -235,7 +235,7 @@ def Diff_1_8_y_MPO(n, dx, options=None):
     last_node[4, 2, 5, 2] = -1   # 10 -> 10 carry for substraction one further (4)
     last_node[4, 3, 5, 3] = -1   # 11 -> 11 carry for substraction one further (4)
     # right terminator
-    right_terminator = 1/dx*cp.array([0, 4/5, -4/5, -1/5, 4/105, -1/280], dtype='float64').reshape(6, 1) # coefficients
+    right_terminator = 1/dx*cp.array([0, -4/5, 4/5, 1/5, -4/105, 1/280], dtype='float64').reshape(6, 1) # coefficients
 
     # Define arrays for MPO
     left_node = contract('ab, burd->aurd', left_terminator, central_node, options=options)
@@ -342,7 +342,7 @@ def Diff_1_8_x_MPO(n, dx, options=None):
     last_node[4, 2, 5, 2] = -1   # 10 -> 10 carry for substraction one further (4)
     last_node[4, 3, 5, 3] = -1   # 11 -> 11 carry for substraction one further (4)
     # right terminator
-    right_terminator = 1/dx*cp.array([0, 4/5, -4/5, -1/5, 4/105, -1/280], dtype='float64').reshape(6, 1) # coefficients
+    right_terminator = 1/dx*cp.array([0, -4/5, 4/5, 1/5, -4/105, 1/280], dtype='float64').reshape(6, 1) # coefficients
 
     # Define arrays for MPO
     left_node = contract('ab, burd->aurd', left_terminator, central_node, options=options)

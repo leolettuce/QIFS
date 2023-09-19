@@ -1,25 +1,26 @@
-from CFD_2D_TDJ_reuse_network import *
+from CFD_2D_TDJ_optimized import *
 
 
 # Create field
-n_bits = 4
+n_bits = 10
 N = 2**n_bits
 L = 1
-chi = 16
-chi_mpo = 16
+chi = 32
+chi_mpo = 32
 
 # Set timesteps
 dt = 0.1*2**-(n_bits-1)
-T = 0.5
+T = 2
 
 # Set penalty factor for breach of incompressibility condition
 dx = 1 / (2**n_bits - 1)
 mu = 2.5 * 10**5
-Re = 0.001*200*1e3
-# Re = 200*1e3
+# mu = 1e3
+# Re = 0.001*200*1e3
+Re = 200*1e3
 
 # Path for saving images
-path = '/home/q541472/dev/TN_CFD/2D_TDJ/cuTensorNet/data'
+path = '/home/q541472/dev/TN_CFD/2D_TDJ/cuTensorNet/temp'
 
 # Linear system solver ("cg", "inv", "scipy.cg")
 solver = "cg"

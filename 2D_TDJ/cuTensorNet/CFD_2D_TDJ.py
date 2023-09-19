@@ -62,7 +62,6 @@ def right_canonicalize_mps(mps_tensors, start, end, options=None):
     # Perform a in-place canonicalization sweep of MPS from left to right.
     mps_tensors = mps_tensors.copy()
     assert end >= start
-    num_sites = len(mps_tensors)
     for i in range(start, end):
         mps_tensors[i:i+2] = canonicalize_mps_tensors(*mps_tensors[i:i+2], absorb='right', options=options)
     return mps_tensors
@@ -481,10 +480,11 @@ def solve_LS_cg(H_11_left, H_11_right, H_12_left, H_12_right, H_22_left, H_22_ri
     r_r += n_r.contract()
 
     iter = 0
-    n = 2
-    for s in b_1.shape:
-        n *= s
-    max_iter = 10*n
+    # n = 2
+    # for s in b_1.shape:
+    #     n *= s
+    # max_iter = 10*n
+    max_iter = 100
     while r_r > 1e-5 and iter < max_iter:
         iter += 1
 
@@ -512,6 +512,7 @@ def solve_LS_cg(H_11_left, H_11_right, H_12_left, H_12_right, H_22_left, H_22_ri
         p_2 = r_new_2 + beta * p_2
 
         r_r = r_new_r_new
+    
     # print(iter, r_r)
     return x_1, x_2
 
@@ -862,7 +863,7 @@ def time_evolution(U, V, chi_mpo, dt, T, Re, mu, save_path, options=None, solver
     t = 0
     for step in range(n_steps):   # for every time step dt
         print(f"Step = {step} - Time = {t}", end='\n')
-        if step%20 == 0:
+        if step%200 == 0:
             plot(U, V, time=t, save_path=f"{save_path}/step_{step}.png", show=False)
             #np.save(f"{save_path}/u_step_{step}.npy", np.array(U, dtype=object))
             #np.save(f"{save_path}/v_step_{step}.npy", np.array(V, dtype=object))
