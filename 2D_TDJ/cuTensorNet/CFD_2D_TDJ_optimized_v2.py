@@ -15,6 +15,28 @@ import sys
 # We will reuse library handle in this notebook to reduce the context initialization time.
 handle = cutn.create()
 options = {'handle': handle}
+networks = {}
+
+def load_config(config_file):
+    with open(config_file, 'r') as fp:
+        config = json.load(fp)
+    n_bits = config['n_bits']
+    N = 2**n_bits
+    L = config['L']
+    chi = config['chi']
+    chi_mpo = config['chi_mpo']
+    dt = 0.1*2**-(n_bits-1)
+    T = config['T']
+    dx = 1 / (2**n_bits - 1)
+    mu = config['mu']
+    Re = config['Re']
+    path = config['path']
+    solver = config['solver']
+
+    return n_bits, N, L, chi, chi_mpo, dt, T, dx, mu, Re, path, solver
+
+
+n_bits, N, L, chi, chi_mpo, dt, T, dx, mu, Re, path, solver('config.json')
 
 
 def multiply_mps_mpo(mps, mpo, algorithm, options=None):
@@ -305,12 +327,24 @@ def get_precontracted_LR_mps_mps(mps_2, mps_1, center=0, options=None):
 
     o = OptimizerOptions(path=[(0, 2), (0, 1)])
 
+    if 'g_p_L_mps_mps' not in networks.keys():
+        networks['g_p_L_mps_mps'] = [None]*n_bits
+        networks['g_p_R_mps_mps'] = [None]*n_bits
+
     # from left to right
     for i in range(center):
         A = mps_1[i]
         B = mps_2[i]
         F = left_networks[i]
-        F_new = contract('apb, cpd, ac->bd', A, B, F, options=options, optimize=o)
+
+        if networks['g_p_L_mps_mps'][i] is None:
+            networks['g_p_L_mps_mps'][i] = Network('apb, cpd, ac->bd', A, B, F, options=options)
+            path, info = networks['g_p_L_mps_mps'][i].contract_path(optimize=o)
+        else:
+            networks['g_p_L_mps_mps'][i].reset_operands(A, B, F)
+
+        F_new = networks['g_p_L_mps_mps'][i].contract()
+        # F_new = contract('apb, cpd, ac->bd', A, B, F, options=options, optimize=o)
         
         left_networks[i+1] = F_new
     
@@ -319,15 +353,22 @@ def get_precontracted_LR_mps_mps(mps_2, mps_1, center=0, options=None):
         A = mps_1[i]
         B = mps_2[i]
         F = right_networks[i]
-        
-        F_new = contract('apb, cpd, bd->ac', A, B, F, options=options, optimize=o)
+
+        if networks['g_p_R_mps_mps'][i] is None:
+            networks['g_p_R_mps_mps'][i] = Network('apb, cpd, bd->ac', A, B, F, options=options)
+            path, info = networks['g_p_R_mps_mps'][i].contract_path(optimize=o)
+        else:
+            networks['g_p_R_mps_mps'][i].reset_operands(A, B, F)
+
+        F_new = networks['g_p_R_mps_mps'][i].contract()
+        # F_new = contract('apb, cpd, bd->ac', A, B, F, options=options, optimize=o)
         
         right_networks[i-1] = F_new
 
     return left_networks, right_networks
 
 
-def get_precontracted_LR_mps_mpo(mps_2, mpo, mps_1, center=0, options=None):
+def get_precontracted_LR_mps_mpo(mps_2, mpo, mps_1, center=0, extra='', options=None):
     # prepare precontracted networks for dmrg sweeps
     # mps_1:    o--o-- center --o--o
     #           |  |            |  |
@@ -346,6 +387,10 @@ def get_precontracted_LR_mps_mpo(mps_2, mpo, mps_1, center=0, options=None):
     right_networks[-1] = dummy_t
 
     o = OptimizerOptions(path=[(0, 3), (0, 2), (0, 1)])
+    
+    if f'g_p_L_mps_mpo{extra}' not in networks.keys():
+        networks[f'g_p_L_mps_mpo{extra}'] = [None]*n_bits
+        networks[f'g_p_R_mps_mpo{extra}'] = [None]*n_bits
 
     # from left to right
     for i in range(center):
@@ -353,7 +398,15 @@ def get_precontracted_LR_mps_mpo(mps_2, mpo, mps_1, center=0, options=None):
         B = mps_2[i]
         W = mpo[i]
         F = left_networks[i]
-        F_new = contract('apb, lprP, cPd, alc->brd', A, W, B, F, options=options, optimize=o)
+
+        if networks[f'g_p_L_mps_mpo{extra}'][i] is None:
+            networks[f'g_p_L_mps_mpo{extra}'][i] = Network('apb, lprP, cPd, alc->brd', A, W, B, F, options=options)
+            path, info = networks[f'g_p_L_mps_mpo{extra}'][i].contract_path(optimize=o)
+        else:
+            networks[f'g_p_L_mps_mpo{extra}'][i].reset_operands(A, W, B, F)
+
+        F_new = networks[f'g_p_L_mps_mpo{extra}'][i].contract()
+        # F_new = contract('apb, lprP, cPd, alc->brd', A, W, B, F, options=options, optimize=o)
         
         left_networks[i+1] = F_new
 
@@ -363,14 +416,22 @@ def get_precontracted_LR_mps_mpo(mps_2, mpo, mps_1, center=0, options=None):
         B = mps_2[i]
         W = mpo[i]
         F = right_networks[i]
-        F_new = contract('apb, lprP, cPd, brd->alc', A, W, B, F, options=options, optimize=o)
+
+        if networks[f'g_p_R_mps_mpo{extra}'][i] is None:
+            networks[f'g_p_R_mps_mpo{extra}'][i] = Network('apb, lprP, cPd, brd->alc', A, W, B, F, options=options)
+            path, info = networks[f'g_p_R_mps_mpo{extra}'][i].contract_path(optimize=o)
+        else:
+            networks[f'g_p_R_mps_mpo{extra}'][i].reset_operands(A, W, B, F)
+
+        F_new = networks[f'g_p_R_mps_mpo{extra}'][i].contract()
+        # F_new = contract('apb, lprP, cPd, brd->alc', A, W, B, F, options=options, optimize=o)
         
         right_networks[i-1] = F_new
 
     return left_networks, right_networks
 
 
-def update_precontracted_LR_mps_mps(F, B, A, LR, options=None):
+def update_precontracted_LR_mps_mps(F, B, A, LR, pos, extra='', options=None):
     # update the precontracted networks for dmrg sweeps
     #                        F--A--
     # For LR='L' contract :  F  |
@@ -380,16 +441,27 @@ def update_precontracted_LR_mps_mps(F, B, A, LR, options=None):
     # For LR='R' contract :    |  F
     #                        --B--F
 
+    operands = [A, B, F]
     o = OptimizerOptions(path=[(0, 2), (0, 1)])
-    if LR == 'L':
-        F_new = contract('apb, cpd, ac->bd', A, B, F, options=options, optimize=o)
-    elif LR == 'R':
-        F_new = contract('apb, cpd, bd->ac', A, B, F, options=options, optimize=o)
+
+    if f'u_p_{LR}_mps_mps{extra}' not in networks.keys():
+        networks[f'u_p_{LR}_mps_mps{extra}'] = [None]*n_bits
+
+    if networks[f'u_p_{LR}_mps_mps{extra}'][pos] is None:
+        if LR == 'L':
+            networks[f'u_p_L_mps_mps{extra}'][pos] = Network('apb, cpd, ac->bd', *operands, options=options)
+        elif LR == 'R':
+            networks[f'u_p_R_mps_mps{extra}'][pos] = Network('apb, cpd, bd->ac', *operands, options=options)
+        path, info = networks[f'u_p_{LR}_mps_mps{extra}'][pos].contract_path(optimize = o)
+    else:
+        networks[f'u_p_{LR}_mps_mps{extra}'][pos].reset_operands(*operands)
+    
+    F_new = networks[f'u_p_{LR}_mps_mps{extra}'][pos].contract()
     
     return F_new
 
 
-def update_precontracted_LR_mps_mpo(F, B, W, A, LR, options=None):
+def update_precontracted_LR_mps_mpo(F, B, W, A, LR, pos, extra='', options=None):
     # update the precontracted networks for dmrg sweeps
     #                        F--A--
     #                        F  |
@@ -403,17 +475,27 @@ def update_precontracted_LR_mps_mpo(F, B, W, A, LR, options=None):
     #                          |  F
     #                        --B--F
 
+    operands = [A, W, B, F]
     o = OptimizerOptions(path=[(0, 3), (0, 2), (0, 1)])
-    if LR == 'L':
-        F_new = contract('apb, lprP, cPd, alc->brd', A, W, B, F, options=options, optimize=o)
 
-    elif LR == 'R':
-        F_new = contract('apb, lprP, cPd, brd->alc', A, W, B, F, options=options, optimize=o)
+    if f'u_p_{LR}_mps_mpo{extra}' not in networks.keys():
+        networks[f'u_p_{LR}_mps_mpo{extra}'] = [None]*n_bits
+
+    if networks[f'u_p_{LR}_mps_mpo{extra}'][pos] is None:
+        if LR == 'L':
+            networks[f'u_p_L_mps_mpo{extra}'][pos] = Network('apb, lprP, cPd, alc->brd', *operands, options=options)
+        elif LR == 'R':
+            networks[f'u_p_R_mps_mpo{extra}'][pos] = Network('apb, lprP, cPd, brd->alc', *operands, options=options)
+        path, info = networks[f'u_p_{LR}_mps_mpo{extra}'][pos].contract_path(optimize = o)
+    else:
+        networks[f'u_p_{LR}_mps_mpo{extra}'][pos].reset_operands(*operands)
+    
+    F_new = networks[f'u_p_{LR}_mps_mpo{extra}'][pos].contract()
     
     return F_new
 
 
-def Ax(H_11_left, H_11_right, H_12_left, H_12_right, H_22_left, H_22_right, x_1, x_2, d1x_d1x, d1x_d1y, d1y_d1y, options=None, n_d=None, n_12=None, n_21=None):
+def Ax(H_11_left, H_11_right, H_12_left, H_12_right, H_22_left, H_22_right, x_1, x_2, d1x_d1x, d1x_d1y, d1y_d1y, pos, options=None):
     # gives tensors corresponding to A*x
     # A = (1 - H_11, -H_12)
     #     (-H_21, 1 - H_22)
@@ -423,51 +505,56 @@ def Ax(H_11_left, H_11_right, H_12_left, H_12_right, H_22_left, H_22_right, x_1,
     operands_12 = [H_12_left, H_12_right, x_2, d1x_d1y]
     operands_21 = [H_12_left, H_12_right, x_1, d1x_d1y]
     operands_22 = [H_22_left, H_22_right, x_2, d1y_d1y]
-    if n_d == None:
-        n_d = Network('umd, reD, upr, mpeP->dPD', *operands_11, options=options) 
-        o = OptimizerOptions(path=[(0, 2), (1, 2), (0, 1)])
-        path, info = n_d.contract_path(optimize=o)
-        n_12 = Network('umd, reD, upr, mpeP->dPD', *operands_12, options=options) 
-        path, info = n_12.contract_path(optimize=o)
-        n_21 = Network('umd, reD, dPD, mpeP->upr', *operands_21, options=options) 
-        path, info = n_21.contract_path(optimize=o)
 
-        Ax_1 -= n_d.contract() + n_12.contract()
-        Ax_2 -= n_21.contract()
+    o = OptimizerOptions(path=[(0, 2), (1, 2), (0, 1)])
 
-        n_d.reset_operands(*operands_22)
-        Ax_2 -= n_d.contract()
 
-        return Ax_1, Ax_2, n_d, n_12, n_21
-    
+    if 'cg_d' not in networks.keys():
+        networks['cg_d'] = [None]*n_bits
+        networks['cg_12'] = [None]*n_bits
+        networks['cg_21'] = [None]*n_bits
+
+    if networks[f'cg_d'][pos] is None:
+        networks['cg_d'][pos] = Network('umd, reD, upr, mpeP->dPD', *operands_11, options=options)
+        path, info = networks['cg_d'][pos].contract_path(optimize=o)
+        networks['cg_12'][pos] = Network('umd, reD, upr, mpeP->dPD', *operands_12, options=options) 
+        path, info = networks['cg_12'][pos].contract_path(optimize=o)
+        networks['cg_21'][pos] = Network('umd, reD, dPD, mpeP->upr', *operands_21, options=options) 
+        path, info = networks['cg_21'][pos].contract_path(optimize=o)
     else:
-        n_d.reset_operands(*operands_11)
-        n_12.reset_operands(*operands_12)
-        n_21.reset_operands(*operands_21)
+        networks['cg_d'][pos].reset_operands(*operands_11)
+        networks['cg_12'][pos].reset_operands(*operands_12)
+        networks['cg_21'][pos].reset_operands(*operands_21)
     
-        Ax_1 -= n_d.contract() + n_12.contract()
-        Ax_2 -= n_21.contract()
+    Ax_1 -= networks['cg_d'][pos].contract() + networks['cg_12'][pos].contract()
+    Ax_2 -= networks['cg_21'][pos].contract()
 
-        n_d.reset_operands(*operands_22)
-        Ax_2 -= n_d.contract()
+    networks['cg_d'][pos].reset_operands(*operands_22)
+    Ax_2 -= networks['cg_d'][pos].contract()
 
-        return Ax_1, Ax_2
+    return Ax_1, Ax_2
 
 
 # conjugate gradient algorithm in MPS form
-def solve_LS_cg(H_11_left, H_11_right, H_12_left, H_12_right, H_22_left, H_22_right, x_1, x_2, d1x_d1x, d1x_d1y, d1y_d1y, b_1, b_2, options=None):
-    Ax_1, Ax_2, n_d, n_12, n_21 = Ax(H_11_left, H_11_right, H_12_left, H_12_right, H_22_left, H_22_right, x_1, x_2, d1x_d1x, d1x_d1y, d1y_d1y, options)
+def solve_LS_cg(H_11_left, H_11_right, H_12_left, H_12_right, H_22_left, H_22_right, x_1, x_2, d1x_d1x, d1x_d1y, d1y_d1y, b_1, b_2, pos, options=None):
+    Ax_1, Ax_2 = Ax(H_11_left, H_11_right, H_12_left, H_12_right, H_22_left, H_22_right, x_1, x_2, d1x_d1x, d1x_d1y, d1y_d1y, pos, options)
     r_1 = b_1 - Ax_1
     r_2 = b_2 - Ax_2
     p_1 = r_1
     p_2 = r_2
 
-    n_r = Network('apb, apb->', r_1, r_1, options=options) 
     o = OptimizerOptions(path=[(0, 1)])
-    path, info = n_r.contract_path(optimize=o)
-    r_r = n_r.contract()
-    n_r.reset_operands(r_2, r_2)
-    r_r += n_r.contract()
+    if 'residual' not in networks.keys():
+        networks['residual'] = [None]*n_bits
+
+    if networks['residual'][pos] is None:
+        networks['residual'][pos] = Network('apb, apb->', r_1, r_1, options=options) 
+        path, info = networks['residual'][pos].contract_path(optimize=o)
+    else:
+        networks['residual'][pos].reset_operands(r_1, r_1)
+    r_r = networks['residual'][pos].contract()
+    networks['residual'][pos].reset_operands(r_2, r_2)
+    r_r += networks['residual'][pos].contract()
 
     iter = 0
     # n = 2
@@ -478,24 +565,24 @@ def solve_LS_cg(H_11_left, H_11_right, H_12_left, H_12_right, H_22_left, H_22_ri
     while r_r > 1e-5 and iter < max_iter:
         iter += 1
 
-        Ap_1, Ap_2 = Ax(H_11_left, H_11_right, H_12_left, H_12_right, H_22_left, H_22_right, p_1, p_2, d1x_d1x, d1x_d1y, d1y_d1y, options, n_d, n_12, n_21)
-        n_r.reset_operands(p_1, Ap_1)
-        pAp_1 = n_r.contract()
-        n_r.reset_operands(p_2, Ap_2)
-        pAp_2 = n_r.contract()
+        Ap_1, Ap_2 = Ax(H_11_left, H_11_right, H_12_left, H_12_right, H_22_left, H_22_right, p_1, p_2, d1x_d1x, d1x_d1y, d1y_d1y, pos, options)
+        networks['residual'][pos].reset_operands(p_1, Ap_1)
+        pAp_1 = networks['residual'][pos].contract()
+        networks['residual'][pos].reset_operands(p_2, Ap_2)
+        pAp_2 = networks['residual'][pos].contract()
         alpha = r_r / (pAp_1 + pAp_2)
 
         x_1 = x_1 + alpha * p_1
         x_2 = x_2 + alpha * p_2
 
-        Ax_1, Ax_2 = Ax(H_11_left, H_11_right, H_12_left, H_12_right, H_22_left, H_22_right, x_1, x_2, d1x_d1x, d1x_d1y, d1y_d1y, options, n_d, n_12, n_21)
+        Ax_1, Ax_2 = Ax(H_11_left, H_11_right, H_12_left, H_12_right, H_22_left, H_22_right, x_1, x_2, d1x_d1x, d1x_d1y, d1y_d1y, pos, options)
         r_new_1 = b_1 - Ax_1
         r_new_2 = b_2 - Ax_2
         
-        n_r.reset_operands(r_new_1, r_new_1)
-        r_new_r_new = n_r.contract()
-        n_r.reset_operands(r_new_2, r_new_2)
-        r_new_r_new += n_r.contract()
+        networks['residual'][pos].reset_operands(r_new_1, r_new_1)
+        r_new_r_new = networks['residual'][pos].contract()
+        networks['residual'][pos].reset_operands(r_new_2, r_new_2)
+        r_new_r_new += networks['residual'][pos].contract()
         beta = r_new_r_new / r_r
 
         p_1 = r_new_1 + beta * p_1
@@ -504,11 +591,6 @@ def solve_LS_cg(H_11_left, H_11_right, H_12_left, H_12_right, H_22_left, H_22_ri
         r_r = r_new_r_new
     
     # print(iter, r_r)
-    n_d.free()
-    n_12.free()
-    n_21.free()
-    n_r.free()
-
     return x_1, x_2
 
 
@@ -560,10 +642,20 @@ def solve_LS_cg_scipy(H_11, H_12, H_22, x_1, x_2, b_1, b_2):
 
 
 # helper function to compute convection-diffusion terms
-def left_right_A_W(left_tn, right_tn, A_t, W_t, options=None, contract_string='umd, upr, mpeP, reD->dPD'):
+def left_right_A_W(left_tn, right_tn, A_t, W_t, pos, extra='', options=None, contract_string='umd, upr, mpeP, reD->dPD'):
+    operands = [left_tn, A_t, W_t, right_tn]
     o = OptimizerOptions(path=[(0, 1), (0, 2), (0, 1)])
 
-    return contract(contract_string, left_tn, A_t, W_t, right_tn, options=options, optimize=o)
+    if f'l_r_A_W{extra}' not in networks.keys():
+        networks[f'l_r_A_W{extra}'] = [None]*n_bits
+
+    if networks[f'l_r_A_W{extra}'][pos] is None:
+        networks[f'l_r_A_W{extra}'][pos] = Network(contract_string, *operands, options=options)
+        path, info = networks[f'l_r_A_W{extra}'][pos].contract_path(optimize = o)
+    else:
+        networks[f'l_r_A_W{extra}'][pos].reset_operands(*operands)
+
+    return networks[f'l_r_A_W{extra}'][pos].contract()
 
 
 def left_right_W(left_tn, right_tn, W_t, options=None, contract_string='umd, mpeP, reD->uprdPD'):
@@ -592,20 +684,20 @@ def single_time_step(U, V, Ax_MPS, Ay_MPS, Bx_MPS, By_MPS, chi_mpo, dt, Re, mu, 
     d1yBy = multiply_mpo_mpo(d1y, By_MPO, mult_algorithm, options)
 
     # convection-diffusion terms for x direction (prefactors not included)
-    U_d2x_Bx_left, U_d2x_Bx_right = get_precontracted_LR_mps_mpo(U, d2x, Bx_MPS, 0, options)
-    U_d2y_Bx_left, U_d2y_Bx_right = get_precontracted_LR_mps_mpo(U, d2y, Bx_MPS, 0, options)
-    U_Bxd1x_Bx_left, U_Bxd1x_Bx_right = get_precontracted_LR_mps_mpo(U, Bxd1x, Bx_MPS, 0, options)
-    U_d1xBx_Bx_left, U_d1xBx_Bx_right = get_precontracted_LR_mps_mpo(U, d1xBx, Bx_MPS, 0, options)
-    U_Byd1y_Bx_left, U_Byd1y_Bx_right = get_precontracted_LR_mps_mpo(U, Byd1y, Bx_MPS, 0, options)
-    U_d1yBy_Bx_left, U_d1yBy_Bx_right = get_precontracted_LR_mps_mpo(U, d1yBy, Bx_MPS, 0, options)
+    U_d2x_Bx_left, U_d2x_Bx_right = get_precontracted_LR_mps_mpo(U, d2x, Bx_MPS, 0, '_d', options)
+    U_d2y_Bx_left, U_d2y_Bx_right = get_precontracted_LR_mps_mpo(U, d2y, Bx_MPS, 0, '_d', options)
+    U_Bxd1x_Bx_left, U_Bxd1x_Bx_right = get_precontracted_LR_mps_mpo(U, Bxd1x, Bx_MPS, 0, '_f', options)
+    U_d1xBx_Bx_left, U_d1xBx_Bx_right = get_precontracted_LR_mps_mpo(U, d1xBx, Bx_MPS, 0, '_f', options)
+    U_Byd1y_Bx_left, U_Byd1y_Bx_right = get_precontracted_LR_mps_mpo(U, Byd1y, Bx_MPS, 0, '_f', options)
+    U_d1yBy_Bx_left, U_d1yBy_Bx_right = get_precontracted_LR_mps_mpo(U, d1yBy, Bx_MPS, 0, '_f', options)
 
     # convection-diffusion terms for y direction (prefactors not included)
-    V_d2x_By_left, V_d2x_By_right = get_precontracted_LR_mps_mpo(V, d2x, By_MPS, 0, options)
-    V_d2y_By_left, V_d2y_By_right = get_precontracted_LR_mps_mpo(V, d2y, By_MPS, 0, options)
-    V_Bxd1x_By_left, V_Bxd1x_By_right = get_precontracted_LR_mps_mpo(V, Bxd1x, By_MPS, 0, options)
-    V_d1xBx_By_left, V_d1xBx_By_right = get_precontracted_LR_mps_mpo(V, d1xBx, By_MPS, 0, options)
-    V_Byd1y_By_left, V_Byd1y_By_right = get_precontracted_LR_mps_mpo(V, Byd1y, By_MPS, 0, options)
-    V_d1yBy_By_left, V_d1yBy_By_right = get_precontracted_LR_mps_mpo(V, d1yBy, By_MPS, 0, options)
+    V_d2x_By_left, V_d2x_By_right = get_precontracted_LR_mps_mpo(V, d2x, By_MPS, 0, '_d', options)
+    V_d2y_By_left, V_d2y_By_right = get_precontracted_LR_mps_mpo(V, d2y, By_MPS, 0, '_d', options)
+    V_Bxd1x_By_left, V_Bxd1x_By_right = get_precontracted_LR_mps_mpo(V, Bxd1x, By_MPS, 0, '_f', options)
+    V_d1xBx_By_left, V_d1xBx_By_right = get_precontracted_LR_mps_mpo(V, d1xBx, By_MPS, 0, '_f', options)
+    V_Byd1y_By_left, V_Byd1y_By_right = get_precontracted_LR_mps_mpo(V, Byd1y, By_MPS, 0, '_f', options)
+    V_d1yBy_By_left, V_d1yBy_By_right = get_precontracted_LR_mps_mpo(V, d1yBy, By_MPS, 0, '_f', options)
 
     epsilon = 1e-5              # convergence criterion
     E_0 = 1e-10                 # initialize energy before
@@ -619,30 +711,46 @@ def single_time_step(U, V, Ax_MPS, Ay_MPS, Bx_MPS, By_MPS, chi_mpo, dt, Re, mu, 
         for i in range(n-1):      
             # Build linear system Ax = b 
             # b_1
-            b_1 = contract('ud, upr, rD->dpD', U_Ax_left[i], Ax_MPS[i], U_Ax_right[i], options=options)
+            operands = [U_Ax_left[i], Ax_MPS[i], U_Ax_right[i]]
+            o = OptimizerOptions(path=[(0, 1), (0, 1)])
+
+            if 'b' not in networks.keys():
+                networks['b'] = [None]*n_bits
+
+            if networks['b'][i] is None:
+                networks['b'][i] = Network('ud, upr, rD->dpD', *operands, options=options)
+                path, info = networks['b'][i].contract_path(optimize = o)
+            else:
+                networks['b'][i].reset_operands(*operands)
+
+            b_1 = networks['b'][i].contract()
+            # b_1 = contract('ud, upr, rD->dpD', U_Ax_left[i], Ax_MPS[i], U_Ax_right[i], options=options)
 
             # convection-diffusion terms
-            b_1 += dt/Re * left_right_A_W(U_d2x_Bx_left[i], U_d2x_Bx_right[i], Bx_MPS[i], d2x[i], options)
-            b_1 += dt/Re * left_right_A_W(U_d2y_Bx_left[i], U_d2y_Bx_right[i], Bx_MPS[i], d2y[i], options)
-            b_1 += -dt/2 * left_right_A_W(U_Bxd1x_Bx_left[i], U_Bxd1x_Bx_right[i], Bx_MPS[i], Bxd1x[i], options)
-            b_1 += -dt/2 * left_right_A_W(U_d1xBx_Bx_left[i], U_d1xBx_Bx_right[i], Bx_MPS[i], d1xBx[i], options)
-            b_1 += -dt/2 * left_right_A_W(U_Byd1y_Bx_left[i], U_Byd1y_Bx_right[i], Bx_MPS[i], Byd1y[i], options)
-            b_1 += -dt/2 * left_right_A_W(U_d1yBy_Bx_left[i], U_d1yBy_Bx_right[i], Bx_MPS[i], d1yBy[i], options)
+            b_1 += dt/Re * left_right_A_W(U_d2x_Bx_left[i], U_d2x_Bx_right[i], Bx_MPS[i], d2x[i], i, '_d', options)
+            b_1 += dt/Re * left_right_A_W(U_d2y_Bx_left[i], U_d2y_Bx_right[i], Bx_MPS[i], d2y[i], i, '_d', options)
+            b_1 += -dt/2 * left_right_A_W(U_Bxd1x_Bx_left[i], U_Bxd1x_Bx_right[i], Bx_MPS[i], Bxd1x[i], i, '_f', options)
+            b_1 += -dt/2 * left_right_A_W(U_d1xBx_Bx_left[i], U_d1xBx_Bx_right[i], Bx_MPS[i], d1xBx[i], i, '_f', options)
+            b_1 += -dt/2 * left_right_A_W(U_Byd1y_Bx_left[i], U_Byd1y_Bx_right[i], Bx_MPS[i], Byd1y[i], i, '_f', options)
+            b_1 += -dt/2 * left_right_A_W(U_d1yBy_Bx_left[i], U_d1yBy_Bx_right[i], Bx_MPS[i], d1yBy[i], i, '_f', options)
             
             # b_2
-            b_2 = contract('ud, upr, rD->dpD', V_Ay_left[i], Ay_MPS[i], V_Ay_right[i], options=options)
+            operands = [V_Ay_left[i], Ay_MPS[i], V_Ay_right[i]]
+            networks['b'][i].reset_operands(*operands)
+            b_2 = networks['b'][i].contract()
+            # b_2 = contract('ud, upr, rD->dpD', V_Ay_left[i], Ay_MPS[i], V_Ay_right[i], options=options)
 
             # convection-diffusion terms
-            b_2 += dt/Re * left_right_A_W(V_d2x_By_left[i], V_d2x_By_right[i], By_MPS[i], d2x[i], options)
-            b_2 += dt/Re * left_right_A_W(V_d2y_By_left[i], V_d2y_By_right[i], By_MPS[i], d2y[i], options)
-            b_2 += -dt/2 * left_right_A_W(V_Bxd1x_By_left[i], V_Bxd1x_By_right[i], By_MPS[i], Bxd1x[i], options)
-            b_2 += -dt/2 * left_right_A_W(V_d1xBx_By_left[i], V_d1xBx_By_right[i], By_MPS[i], d1xBx[i], options)
-            b_2 += -dt/2 * left_right_A_W(V_Byd1y_By_left[i], V_Byd1y_By_right[i], By_MPS[i], Byd1y[i], options)
-            b_2 += -dt/2 * left_right_A_W(V_d1yBy_By_left[i], V_d1yBy_By_right[i], By_MPS[i], d1yBy[i], options)
+            b_2 += dt/Re * left_right_A_W(V_d2x_By_left[i], V_d2x_By_right[i], By_MPS[i], d2x[i], i, '_d', options)
+            b_2 += dt/Re * left_right_A_W(V_d2y_By_left[i], V_d2y_By_right[i], By_MPS[i], d2y[i], i, '_d', options)
+            b_2 += -dt/2 * left_right_A_W(V_Bxd1x_By_left[i], V_Bxd1x_By_right[i], By_MPS[i], Bxd1x[i], i, '_f', options)
+            b_2 += -dt/2 * left_right_A_W(V_d1xBx_By_left[i], V_d1xBx_By_right[i], By_MPS[i], d1xBx[i], i, '_f', options)
+            b_2 += -dt/2 * left_right_A_W(V_Byd1y_By_left[i], V_Byd1y_By_right[i], By_MPS[i], Byd1y[i], i, '_f', options)
+            b_2 += -dt/2 * left_right_A_W(V_d1yBy_By_left[i], V_d1yBy_By_right[i], By_MPS[i], d1yBy[i], i, '_f', options)
 
             # solve linear system
             if solver == 'cg':
-                U_new, V_new = solve_LS_cg(U_d1x_d1x_U_left[i], U_d1x_d1x_U_right[i], U_d1x_d1y_V_left[i], U_d1x_d1y_V_right[i], V_d1y_d1y_V_left[i], V_d1y_d1y_V_right[i], U[i], V[i], mu*dt**2 * d1x_d1x[i], mu*dt**2 * d1x_d1y[i], mu*dt**2 * d1y_d1y[i], b_1, b_2, options)
+                U_new, V_new = solve_LS_cg(U_d1x_d1x_U_left[i], U_d1x_d1x_U_right[i], U_d1x_d1y_V_left[i], U_d1x_d1y_V_right[i], V_d1y_d1y_V_left[i], V_d1y_d1y_V_right[i], U[i], V[i], mu*dt**2 * d1x_d1x[i], mu*dt**2 * d1x_d1y[i], mu*dt**2 * d1y_d1y[i], b_1, b_2, i, options)
             elif solver == 'inv':
                 H_11 = mu*dt**2 * left_right_W(U_d1x_d1x_U_left[i], U_d1x_d1x_U_right[i], d1x_d1x[i], options)
                 H_12 = mu*dt**2 * left_right_W(U_d1x_d1y_V_left[i], U_d1x_d1y_V_right[i], d1x_d1y[i], options)
@@ -670,55 +778,65 @@ def single_time_step(U, V, Ax_MPS, Ay_MPS, Bx_MPS, By_MPS, chi_mpo, dt, Re, mu, 
             V = shift_canonical_center(V, i+1, i, options)
 
             # update precontracted networks
-            U_Ax_left[i+1] = update_precontracted_LR_mps_mps(U_Ax_left[i], U[i], Ax_MPS[i], 'L', options)
-            V_Ay_left[i+1] = update_precontracted_LR_mps_mps(V_Ay_left[i], V[i], Ay_MPS[i], 'L', options)
+            U_Ax_left[i+1] = update_precontracted_LR_mps_mps(U_Ax_left[i], U[i], Ax_MPS[i], 'L', i, options)
+            V_Ay_left[i+1] = update_precontracted_LR_mps_mps(V_Ay_left[i], V[i], Ay_MPS[i], 'L', i, options)
 
-            U_d2x_Bx_left[i+1] = update_precontracted_LR_mps_mpo(U_d2x_Bx_left[i], U[i], d2x[i], Bx_MPS[i], 'L', options)
-            U_d2y_Bx_left[i+1] = update_precontracted_LR_mps_mpo(U_d2y_Bx_left[i], U[i], d2y[i], Bx_MPS[i], 'L', options)
-            U_Bxd1x_Bx_left[i+1] = update_precontracted_LR_mps_mpo(U_Bxd1x_Bx_left[i], U[i], Bxd1x[i], Bx_MPS[i], 'L', options)
-            U_d1xBx_Bx_left[i+1] = update_precontracted_LR_mps_mpo(U_d1xBx_Bx_left[i], U[i], d1xBx[i], Bx_MPS[i], 'L', options)
-            U_Byd1y_Bx_left[i+1] = update_precontracted_LR_mps_mpo(U_Byd1y_Bx_left[i], U[i], Byd1y[i], Bx_MPS[i], 'L', options)
-            U_d1yBy_Bx_left[i+1] = update_precontracted_LR_mps_mpo(U_d1yBy_Bx_left[i], U[i], d1yBy[i], Bx_MPS[i], 'L', options)
+            U_d2x_Bx_left[i+1] = update_precontracted_LR_mps_mpo(U_d2x_Bx_left[i], U[i], d2x[i], Bx_MPS[i], 'L', i, '_d', options)
+            U_d2y_Bx_left[i+1] = update_precontracted_LR_mps_mpo(U_d2y_Bx_left[i], U[i], d2y[i], Bx_MPS[i], 'L', i, '_d', options)
+            U_Bxd1x_Bx_left[i+1] = update_precontracted_LR_mps_mpo(U_Bxd1x_Bx_left[i], U[i], Bxd1x[i], Bx_MPS[i], 'L', i, '_f', options)
+            U_d1xBx_Bx_left[i+1] = update_precontracted_LR_mps_mpo(U_d1xBx_Bx_left[i], U[i], d1xBx[i], Bx_MPS[i], 'L', i, '_f', options)
+            U_Byd1y_Bx_left[i+1] = update_precontracted_LR_mps_mpo(U_Byd1y_Bx_left[i], U[i], Byd1y[i], Bx_MPS[i], 'L', i, '_f', options)
+            U_d1yBy_Bx_left[i+1] = update_precontracted_LR_mps_mpo(U_d1yBy_Bx_left[i], U[i], d1yBy[i], Bx_MPS[i], 'L', i, '_f', options)
 
-            V_d2x_By_left[i+1] = update_precontracted_LR_mps_mpo(V_d2x_By_left[i], V[i], d2x[i], By_MPS[i], 'L', options)
-            V_d2y_By_left[i+1] = update_precontracted_LR_mps_mpo(V_d2y_By_left[i], V[i], d2y[i], By_MPS[i], 'L', options)
-            V_Bxd1x_By_left[i+1] = update_precontracted_LR_mps_mpo(V_Bxd1x_By_left[i], V[i], Bxd1x[i], By_MPS[i], 'L', options)
-            V_d1xBx_By_left[i+1] = update_precontracted_LR_mps_mpo(V_d1xBx_By_left[i], V[i], d1xBx[i], By_MPS[i], 'L', options)
-            V_Byd1y_By_left[i+1] = update_precontracted_LR_mps_mpo(V_Byd1y_By_left[i], V[i], Byd1y[i], By_MPS[i], 'L', options)
-            V_d1yBy_By_left[i+1] = update_precontracted_LR_mps_mpo(V_d1yBy_By_left[i], V[i], d1yBy[i], By_MPS[i], 'L', options)
+            V_d2x_By_left[i+1] = update_precontracted_LR_mps_mpo(V_d2x_By_left[i], V[i], d2x[i], By_MPS[i], 'L', i, '_d', options)
+            V_d2y_By_left[i+1] = update_precontracted_LR_mps_mpo(V_d2y_By_left[i], V[i], d2y[i], By_MPS[i], 'L', i, '_d', options)
+            V_Bxd1x_By_left[i+1] = update_precontracted_LR_mps_mpo(V_Bxd1x_By_left[i], V[i], Bxd1x[i], By_MPS[i], 'L', i, '_f', options)
+            V_d1xBx_By_left[i+1] = update_precontracted_LR_mps_mpo(V_d1xBx_By_left[i], V[i], d1xBx[i], By_MPS[i], 'L', i, '_f', options)
+            V_Byd1y_By_left[i+1] = update_precontracted_LR_mps_mpo(V_Byd1y_By_left[i], V[i], Byd1y[i], By_MPS[i], 'L', i, '_f', options)
+            V_d1yBy_By_left[i+1] = update_precontracted_LR_mps_mpo(V_d1yBy_By_left[i], V[i], d1yBy[i], By_MPS[i], 'L', i, '_f', options)
 
-            U_d1x_d1x_U_left[i+1] = update_precontracted_LR_mps_mpo(U_d1x_d1x_U_left[i], U[i], d1x_d1x[i], U[i], 'L', options)
-            U_d1x_d1y_V_left[i+1] = update_precontracted_LR_mps_mpo(U_d1x_d1y_V_left[i], U[i], d1x_d1y[i], V[i], 'L', options)
-            V_d1y_d1y_V_left[i+1] = update_precontracted_LR_mps_mpo(V_d1y_d1y_V_left[i], V[i], d1y_d1y[i], V[i], 'L', options)
+            U_d1x_d1x_U_left[i+1] = update_precontracted_LR_mps_mpo(U_d1x_d1x_U_left[i], U[i], d1x_d1x[i], U[i], 'L', i, '_dd', options)
+            U_d1x_d1y_V_left[i+1] = update_precontracted_LR_mps_mpo(U_d1x_d1y_V_left[i], U[i], d1x_d1y[i], V[i], 'L', i, '_ddxy', options)
+            V_d1y_d1y_V_left[i+1] = update_precontracted_LR_mps_mpo(V_d1y_d1y_V_left[i], V[i], d1y_d1y[i], V[i], 'L', i, '_dd', options)
         
         # sweep back through MPS and optimize locally
         for i in range(n-1, 0, -1):
             # Build linear system Ax = b 
             # b_1
-            b_1 = contract('ud, upr, rD->dpD', U_Ax_left[i], Ax_MPS[i], U_Ax_right[i], options=options)
+            operands = [U_Ax_left[i], Ax_MPS[i], U_Ax_right[i]]
+            if networks['b'][i] is None:
+                networks['b'][i] = Network('ud, upr, rD->dpD', *operands, options=options)
+                path, info = networks['b'][i].contract_path(optimize = o)
+            else:
+                networks['b'][i].reset_operands(*operands)
+            b_1 = networks['b'][i].contract()
+            # b_1 = contract('ud, upr, rD->dpD', U_Ax_left[i], Ax_MPS[i], U_Ax_right[i], options=options)
 
             # convection-diffusion terms
-            b_1 += dt/Re * left_right_A_W(U_d2x_Bx_left[i], U_d2x_Bx_right[i], Bx_MPS[i], d2x[i], options)
-            b_1 += dt/Re * left_right_A_W(U_d2y_Bx_left[i], U_d2y_Bx_right[i], Bx_MPS[i], d2y[i], options)
-            b_1 += -dt/2 * left_right_A_W(U_Bxd1x_Bx_left[i], U_Bxd1x_Bx_right[i], Bx_MPS[i], Bxd1x[i], options)
-            b_1 += -dt/2 * left_right_A_W(U_d1xBx_Bx_left[i], U_d1xBx_Bx_right[i], Bx_MPS[i], d1xBx[i], options)
-            b_1 += -dt/2 * left_right_A_W(U_Byd1y_Bx_left[i], U_Byd1y_Bx_right[i], Bx_MPS[i], Byd1y[i], options)
-            b_1 += -dt/2 * left_right_A_W(U_d1yBy_Bx_left[i], U_d1yBy_Bx_right[i], Bx_MPS[i], d1yBy[i], options)
+            b_1 += dt/Re * left_right_A_W(U_d2x_Bx_left[i], U_d2x_Bx_right[i], Bx_MPS[i], d2x[i], i, '_d', options)
+            b_1 += dt/Re * left_right_A_W(U_d2y_Bx_left[i], U_d2y_Bx_right[i], Bx_MPS[i], d2y[i], i, '_d', options)
+            b_1 += -dt/2 * left_right_A_W(U_Bxd1x_Bx_left[i], U_Bxd1x_Bx_right[i], Bx_MPS[i], Bxd1x[i], i, '_f', options)
+            b_1 += -dt/2 * left_right_A_W(U_d1xBx_Bx_left[i], U_d1xBx_Bx_right[i], Bx_MPS[i], d1xBx[i], i, '_f', options)
+            b_1 += -dt/2 * left_right_A_W(U_Byd1y_Bx_left[i], U_Byd1y_Bx_right[i], Bx_MPS[i], Byd1y[i], i, '_f', options)
+            b_1 += -dt/2 * left_right_A_W(U_d1yBy_Bx_left[i], U_d1yBy_Bx_right[i], Bx_MPS[i], d1yBy[i], i, '_f', options)
 
             # b_2
-            b_2 = contract('ud, upr, rD->dpD', V_Ay_left[i], Ay_MPS[i], V_Ay_right[i], options=options)
+            operands = [V_Ay_left[i], Ay_MPS[i], V_Ay_right[i]]
+            networks['b'][i].reset_operands(*operands)
+            b_2 = networks['b'][i].contract()
+            # b_2 = contract('ud, upr, rD->dpD', V_Ay_left[i], Ay_MPS[i], V_Ay_right[i], options=options)
 
             # convection-diffusion terms
-            b_2 += dt/Re * left_right_A_W(V_d2x_By_left[i], V_d2x_By_right[i], By_MPS[i], d2x[i], options)
-            b_2 += dt/Re * left_right_A_W(V_d2y_By_left[i], V_d2y_By_right[i], By_MPS[i], d2y[i], options)
-            b_2 += -dt/2 * left_right_A_W(V_Bxd1x_By_left[i], V_Bxd1x_By_right[i], By_MPS[i], Bxd1x[i], options)
-            b_2 += -dt/2 * left_right_A_W(V_d1xBx_By_left[i], V_d1xBx_By_right[i], By_MPS[i], d1xBx[i], options)
-            b_2 += -dt/2 * left_right_A_W(V_Byd1y_By_left[i], V_Byd1y_By_right[i], By_MPS[i], Byd1y[i], options)
-            b_2 += -dt/2 * left_right_A_W(V_d1yBy_By_left[i], V_d1yBy_By_right[i], By_MPS[i], d1yBy[i], options)
+            b_2 += dt/Re * left_right_A_W(V_d2x_By_left[i], V_d2x_By_right[i], By_MPS[i], d2x[i], i, '_d', options)
+            b_2 += dt/Re * left_right_A_W(V_d2y_By_left[i], V_d2y_By_right[i], By_MPS[i], d2y[i], i, '_d', options)
+            b_2 += -dt/2 * left_right_A_W(V_Bxd1x_By_left[i], V_Bxd1x_By_right[i], By_MPS[i], Bxd1x[i], i, '_f', options)
+            b_2 += -dt/2 * left_right_A_W(V_d1xBx_By_left[i], V_d1xBx_By_right[i], By_MPS[i], d1xBx[i], i, '_f', options)
+            b_2 += -dt/2 * left_right_A_W(V_Byd1y_By_left[i], V_Byd1y_By_right[i], By_MPS[i], Byd1y[i], i, '_f', options)
+            b_2 += -dt/2 * left_right_A_W(V_d1yBy_By_left[i], V_d1yBy_By_right[i], By_MPS[i], d1yBy[i], i, '_f', options)
 
             # solve linear system
             if solver == 'cg':
-                U_new, V_new = solve_LS_cg(U_d1x_d1x_U_left[i], U_d1x_d1x_U_right[i], U_d1x_d1y_V_left[i], U_d1x_d1y_V_right[i], V_d1y_d1y_V_left[i], V_d1y_d1y_V_right[i], U[i], V[i], mu*dt**2 * d1x_d1x[i], mu*dt**2 * d1x_d1y[i], mu*dt**2 * d1y_d1y[i], b_1, b_2, options)
+                U_new, V_new = solve_LS_cg(U_d1x_d1x_U_left[i], U_d1x_d1x_U_right[i], U_d1x_d1y_V_left[i], U_d1x_d1y_V_right[i], V_d1y_d1y_V_left[i], V_d1y_d1y_V_right[i], U[i], V[i], mu*dt**2 * d1x_d1x[i], mu*dt**2 * d1x_d1y[i], mu*dt**2 * d1y_d1y[i], b_1, b_2, i, options)
             elif solver == 'inv':
                 H_11 = mu*dt**2 * left_right_W(U_d1x_d1x_U_left[i], U_d1x_d1x_U_right[i], d1x_d1x[i], options)
                 H_12 = mu*dt**2 * left_right_W(U_d1x_d1y_V_left[i], U_d1x_d1y_V_right[i], d1x_d1y[i], options)
@@ -746,29 +864,43 @@ def single_time_step(U, V, Ax_MPS, Ay_MPS, Bx_MPS, By_MPS, chi_mpo, dt, Re, mu, 
             V = shift_canonical_center(V, i-1, i, options)
 
             # update precontracted networks
-            U_Ax_right[i-1] = update_precontracted_LR_mps_mps(U_Ax_right[i], U[i], Ax_MPS[i], 'R', options)
-            V_Ay_right[i-1] = update_precontracted_LR_mps_mps(V_Ay_right[i], V[i], Ay_MPS[i], 'R', options)
+            U_Ax_right[i-1] = update_precontracted_LR_mps_mps(U_Ax_right[i], U[i], Ax_MPS[i], 'R', i, options)
+            V_Ay_right[i-1] = update_precontracted_LR_mps_mps(V_Ay_right[i], V[i], Ay_MPS[i], 'R', i, options)
 
-            U_d2x_Bx_right[i-1] = update_precontracted_LR_mps_mpo(U_d2x_Bx_right[i], U[i], d2x[i], Bx_MPS[i], 'R', options)
-            U_d2y_Bx_right[i-1] = update_precontracted_LR_mps_mpo(U_d2y_Bx_right[i], U[i], d2y[i], Bx_MPS[i], 'R', options)
-            U_Bxd1x_Bx_right[i-1] = update_precontracted_LR_mps_mpo(U_Bxd1x_Bx_right[i], U[i], Bxd1x[i], Bx_MPS[i], 'R', options)
-            U_d1xBx_Bx_right[i-1] = update_precontracted_LR_mps_mpo(U_d1xBx_Bx_right[i], U[i], d1xBx[i], Bx_MPS[i], 'R', options)
-            U_Byd1y_Bx_right[i-1] = update_precontracted_LR_mps_mpo(U_Byd1y_Bx_right[i], U[i], Byd1y[i], Bx_MPS[i], 'R', options)
-            U_d1yBy_Bx_right[i-1] = update_precontracted_LR_mps_mpo(U_d1yBy_Bx_right[i], U[i], d1yBy[i], Bx_MPS[i], 'R', options)
+            U_d2x_Bx_right[i-1] = update_precontracted_LR_mps_mpo(U_d2x_Bx_right[i], U[i], d2x[i], Bx_MPS[i], 'R', i, '_d', options)
+            U_d2y_Bx_right[i-1] = update_precontracted_LR_mps_mpo(U_d2y_Bx_right[i], U[i], d2y[i], Bx_MPS[i], 'R', i, '_d', options)
+            U_Bxd1x_Bx_right[i-1] = update_precontracted_LR_mps_mpo(U_Bxd1x_Bx_right[i], U[i], Bxd1x[i], Bx_MPS[i], 'R', i, '_f', options)
+            U_d1xBx_Bx_right[i-1] = update_precontracted_LR_mps_mpo(U_d1xBx_Bx_right[i], U[i], d1xBx[i], Bx_MPS[i], 'R', i, '_f', options)
+            U_Byd1y_Bx_right[i-1] = update_precontracted_LR_mps_mpo(U_Byd1y_Bx_right[i], U[i], Byd1y[i], Bx_MPS[i], 'R', i, '_f', options)
+            U_d1yBy_Bx_right[i-1] = update_precontracted_LR_mps_mpo(U_d1yBy_Bx_right[i], U[i], d1yBy[i], Bx_MPS[i], 'R', i, '_f', options)
 
-            V_d2x_By_right[i-1] = update_precontracted_LR_mps_mpo(V_d2x_By_right[i], V[i], d2x[i], By_MPS[i], 'R', options)
-            V_d2y_By_right[i-1] = update_precontracted_LR_mps_mpo(V_d2y_By_right[i], V[i], d2y[i], By_MPS[i], 'R', options)
-            V_Bxd1x_By_right[i-1] = update_precontracted_LR_mps_mpo(V_Bxd1x_By_right[i], V[i], Bxd1x[i], By_MPS[i], 'R', options)
-            V_d1xBx_By_right[i-1] = update_precontracted_LR_mps_mpo(V_d1xBx_By_right[i], V[i], d1xBx[i], By_MPS[i], 'R', options)
-            V_Byd1y_By_right[i-1] = update_precontracted_LR_mps_mpo(V_Byd1y_By_right[i], V[i], Byd1y[i], By_MPS[i], 'R', options)
-            V_d1yBy_By_right[i-1] = update_precontracted_LR_mps_mpo(V_d1yBy_By_right[i], V[i], d1yBy[i], By_MPS[i], 'R', options)
+            V_d2x_By_right[i-1] = update_precontracted_LR_mps_mpo(V_d2x_By_right[i], V[i], d2x[i], By_MPS[i], 'R', i, '_d', options)
+            V_d2y_By_right[i-1] = update_precontracted_LR_mps_mpo(V_d2y_By_right[i], V[i], d2y[i], By_MPS[i], 'R', i, '_d', options)
+            V_Bxd1x_By_right[i-1] = update_precontracted_LR_mps_mpo(V_Bxd1x_By_right[i], V[i], Bxd1x[i], By_MPS[i], 'R', i, '_f', options)
+            V_d1xBx_By_right[i-1] = update_precontracted_LR_mps_mpo(V_d1xBx_By_right[i], V[i], d1xBx[i], By_MPS[i], 'R', i, '_f', options)
+            V_Byd1y_By_right[i-1] = update_precontracted_LR_mps_mpo(V_Byd1y_By_right[i], V[i], Byd1y[i], By_MPS[i], 'R', i, '_f', options)
+            V_d1yBy_By_right[i-1] = update_precontracted_LR_mps_mpo(V_d1yBy_By_right[i], V[i], d1yBy[i], By_MPS[i], 'R', i, '_f', options)
 
-            U_d1x_d1x_U_right[i-1] = update_precontracted_LR_mps_mpo(U_d1x_d1x_U_right[i], U[i], d1x_d1x[i], U[i], 'R', options)
-            U_d1x_d1y_V_right[i-1] = update_precontracted_LR_mps_mpo(U_d1x_d1y_V_right[i], U[i], d1x_d1y[i], V[i], 'R', options)
-            V_d1y_d1y_V_right[i-1] = update_precontracted_LR_mps_mpo(V_d1y_d1y_V_right[i], V[i], d1y_d1y[i], V[i], 'R', options)
+            U_d1x_d1x_U_right[i-1] = update_precontracted_LR_mps_mpo(U_d1x_d1x_U_right[i], U[i], d1x_d1x[i], U[i], 'R', i, '_dd', options)
+            U_d1x_d1y_V_right[i-1] = update_precontracted_LR_mps_mpo(U_d1x_d1y_V_right[i], U[i], d1x_d1y[i], V[i], 'R', i, '_ddxy', options)
+            V_d1y_d1y_V_right[i-1] = update_precontracted_LR_mps_mpo(V_d1y_d1y_V_right[i], V[i], d1y_d1y[i], V[i], 'R', i, '_dd', options)
 
         E_0 = E_1       
-        E_1 = contract('apb, apb->', U[0], U[0], options=options) + contract('apb, apb->', V[0], V[0], options=options) 
+        # E_1 = contract('apb, apb->', U[0], U[0], options=options) + contract('apb, apb->', V[0], V[0], options=options) 
+
+        operands = [U[0], U[0]]
+        o = OptimizerOptions(path=[(0, 1)])
+        if 'norm' not in networks.keys():
+            networks['norm'] = Network('apb, apb->', *operands, options=options)
+            path, info = networks['norm'].contract_path(optimize = o)
+        else:
+            networks['norm'].reset_operands(*operands)
+
+        E_1_U = networks['norm'].contract()
+        operands = [V[0], V[0]]
+        networks['norm'].reset_operands(*operands)
+        E_1_V = networks['norm'].contract()
+        E_1 = E_1_U + E_1_V
         print(f"Run: {run}, Diff: {(E_1-E_0)/E_0}, E_0: {E_0}, E_1: {E_1}", end='\r')
     print(f"Run: {run}, Diff: {(E_1-E_0)/E_0}, E_0: {E_0}, E_1: {E_1}", end='\r')
     
@@ -805,11 +937,24 @@ def plot(U, V, time=-1, full=False, save_path=None, show=False):
         plt.show()
 
 
+# Free all network objects
+def free_networks(n_dict):
+    for key, el in n_dict.items():
+        if isinstance(el, dict):
+            free_networks(el)
+        elif isinstance(el, list):
+            for el_ in el:
+                if el_ is not None:
+                    el_.free()
+        else:
+            el.free()
+
+
 # time evolution algorithm
-def time_evolution(U, V, chi_mpo, dt, T, Re, mu, save_path, options=None, solver='cg', t=0):
+def time_evolution(U, V, chi_mpo, dt, T, Re, mu, save_path, options=None, solver='cg'):
     n = len(U)
     dx = 1 / (2**n - 1)
-    n_steps = int(np.ceil((T-t)/dt))    # time steps
+    n_steps = int(np.ceil(T/dt))    # time steps
     # finite difference operators with 8th order precision
     d1x = Diff_1_8_x_MPO(n, dx, options)
     d1y = Diff_1_8_y_MPO(n, dx, options)
@@ -832,17 +977,18 @@ def time_evolution(U, V, chi_mpo, dt, T, Re, mu, save_path, options=None, solver
     V = canonical_center(V, 0, options)
 
     # initialize precontracted left and right networks
-    U_d1x_d1x_U_left, U_d1x_d1x_U_right = get_precontracted_LR_mps_mpo(U, d1x_d1x, U, 0, options)
-    U_d1x_d1y_V_left, U_d1x_d1y_V_right = get_precontracted_LR_mps_mpo(U, d1x_d1y, V, 0, options)
-    V_d1y_d1y_V_left, V_d1y_d1y_V_right = get_precontracted_LR_mps_mpo(V, d1y_d1y, V, 0, options)
+    U_d1x_d1x_U_left, U_d1x_d1x_U_right = get_precontracted_LR_mps_mpo(U, d1x_d1x, U, 0, '_dd', options)
+    U_d1x_d1y_V_left, U_d1x_d1y_V_right = get_precontracted_LR_mps_mpo(U, d1x_d1y, V, 0, '_ddxy', options)
+    V_d1y_d1y_V_left, V_d1y_d1y_V_right = get_precontracted_LR_mps_mpo(V, d1y_d1y, V, 0, '_dd', options)
 
+    t = 0
     
     for step in range(n_steps):   # for every time step dt
         print(f"Step = {step} - Time = {t}", end='\n')
-        # if step%250 == 0:
-        #     plot(U, V, time=t, save_path=f"{save_path}/time_{round(t, 5)}.png", show=False)
-        #     np.save(f"{save_path}/u_time_{round(t, 5)}.npy", np.array([el.get() for el in U], dtype=object))
-        #     np.save(f"{save_path}/v_time_{round(t, 5)}.npy", np.array([el.get() for el in V], dtype=object))
+        # if step%200 == 0:
+        #     plot(U, V, time=t, save_path=f"{save_path}/time_{TimeoutError}.png", show=False)
+            #np.save(f"{save_path}/u_step_{step}.npy", np.array(U, dtype=object))
+            #np.save(f"{save_path}/v_step_{step}.npy", np.array(V, dtype=object))
 
         U_trial = U.copy()         # trial velocity state
         V_trial = V.copy()         # trial velocity state
@@ -863,8 +1009,11 @@ def time_evolution(U, V, chi_mpo, dt, T, Re, mu, save_path, options=None, solver
         t += dt
     
     # plot(U, V, time=t, save_path=f"{save_path}/final.png", show=False)
-    # np.save(f"{save_path}/u_final.npy", np.array([el.get() for el in U], dtype=object))
-    # np.save(f"{save_path}/v_final.npy", np.array([el.get() for el in V], dtype=object))
+    #np.save(f"{save_path}/u_final.npy", np.array(U, dtype=object))
+    #np.save(f"{save_path}/v_final.npy", np.array(V, dtype=object))
+    
+    free_networks(networks)
+    networks = {}
         
 
 def build_initial_fields(n_bits, L, chi, y_min=0.4, y_max=0.6, h=1/200, u_max=1):
