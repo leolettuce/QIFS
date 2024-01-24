@@ -596,67 +596,75 @@ def cost_function(U, V, Ax_MPS, Ay_MPS, Bx_MPS, By_MPS, chi, dt, Re, mu, n, dx):
 
 
 # helper functions for the conjugate gradient algorithm in MPS form
-def Hx(H, x):
+def Hx(H_left, H_right, x, W, transpose=False):
     # gives tensor corresponding to H*x
-    H = H.copy(deep=True)
+    H_left = H_left.copy(deep=True)
+    H_right = H_right.copy(deep=True)
     x = x.copy(deep=True)
-    tn = H | x 
-    
-    qu.tensor.connect(H, x, 0, 0)   # l
-    qu.tensor.connect(H, x, 2, 1)   # p
-    qu.tensor.connect(H, x, 4, 2)   # r
-    temp = tn^...
+    W = W.copy(deep=True)
+
+    tn = H_left | W | H_right | x 
+    if transpose:
+        qu.tensor.connect(W, H_left, 0, 1)   # connect the left bond of W with the middle one of H_left
+        qu.tensor.connect(W, H_right, 1, 1)  # connect the right bond of W with the middle one of H_right
+        qu.tensor.connect(x, H_left, 0, 2)   # connect the left bond of x with the lower bond of H_left
+        qu.tensor.connect(x, H_right, 2, 2)  # connect the right bond of x with the lower bond of H_right
+        qu.tensor.connect(x, W, 1, 3)        # connect the middle bond of x with the lower middle bond of W
+    else:
+        qu.tensor.connect(W, H_left, 0, 1)   # connect the left bond of W with the middle one of H_left
+        qu.tensor.connect(W, H_right, 1, 1)  # connect the right bond of W with the middle one of H_right
+        qu.tensor.connect(x, H_left, 0, 0)   # connect the left bond of x with the upper bond of H_left
+        qu.tensor.connect(x, H_right, 2, 0)  # connect the right bond of x with the upper bond of H_right
+        qu.tensor.connect(x, W, 1, 2)        # connect the middle bond of x with the upper middle bond of W
+
+    o = ((0, 3), (0, 2), (0, 1))
+    temp =  tn.contract(optimize=o)
     temp.reindex({temp.inds[0]: 'l', temp.inds[1]: 'p', temp.inds[2]: 'r'}, inplace=True)
 
-    return temp 
+    return temp
 
 
-def Ax(H_11, H_12, H_22, x_1, x_2):
+def Ax(H_11_left, H_11_right, H_12_left, H_12_right, H_22_left, H_22_right, x_1, x_2, d1x_d1x, d1x_d1y, d1y_d1y):
     # gives tensors corresponding to A*x
     # A = (1 - H_11, -H_12)
     #     (-H_21, 1 - H_22)
-    Ax_1 = x_1 - Hx(H_11, x_1) - Hx(H_12, x_2)
-    H_21 = H_12.transpose(H_12.inds[1], H_12.inds[0], H_12.inds[3], H_12.inds[2], H_12.inds[5], H_12.inds[4])
-    Ax_2 = x_2 - Hx(H_21, x_1) - Hx(H_22, x_2)
+    Ax_1 = x_1 - Hx(H_11_left, H_11_right, x_1, d1x_d1x) - Hx(H_12_left, H_12_right, x_2, d1x_d1y)
+    Ax_2 = x_2 - Hx(H_12_left, H_12_right, x_1, d1x_d1y, transpose=True) - Hx(H_22_left, H_22_right, x_2, d1y_d1y)
 
     return Ax_1, Ax_2
 
 
-def b_Ax(H_11, H_12, H_22, x_1, x_2, b_1, b_2):
+def b_Ax(H_11_left, H_11_right, H_12_left, H_12_right, H_22_left, H_22_right, x_1, x_2, b_1, b_2, d1x_d1x, d1x_d1y, d1y_d1y):
     # gives tensors corresponding to b - A*x
-    Ax_1, Ax_2 = Ax(H_11, H_12, H_22, x_1, x_2)
+    Ax_1, Ax_2 = Ax(H_11_left, H_11_right, H_12_left, H_12_right, H_22_left, H_22_right, x_1, x_2, d1x_d1x, d1x_d1y, d1y_d1y)
 
     return b_1 - Ax_1, b_2 - Ax_2
 
 
-def yAx(y_1, y_2, H_11, H_12, H_22, x_1, x_2):
+def yAx(y_1, y_2, H_11_left, H_11_right, H_12_left, H_12_right, H_22_left, H_22_right, x_1, x_2, d1x_d1x, d1x_d1y, d1y_d1y):
     # gives tensors corresponding to y*A*x
-    Ax_1, Ax_2 = Ax(H_11, H_12, H_22, x_1, x_2)
+    Ax_1, Ax_2 = Ax(H_11_left, H_11_right, H_12_left, H_12_right, H_22_left, H_22_right, x_1, x_2, d1x_d1x, d1x_d1y, d1y_d1y)
 
     return y_1 @ Ax_1 + y_2 @ Ax_2
 
 
-# conjugate gradient algorithm in MPS form
-def solve_LS_cg(H_11, H_12, H_22, x_1, x_2, b_1, b_2):
-    r_1, r_2 = b_Ax(H_11, H_12, H_22, x_1, x_2, b_1, b_2)
+def solve_LS_cg(H_11_left, H_11_right, H_12_left, H_12_right, H_22_left, H_22_right, x_1, x_2, d1x_d1x, d1x_d1y, d1y_d1y, b_1, b_2):
+    r_1, r_2 = b_Ax(H_11_left, H_11_right, H_12_left, H_12_right, H_22_left, H_22_right, x_1, x_2, b_1, b_2, d1x_d1x, d1x_d1y, d1y_d1y)
     p_1 = r_1
     p_2 = r_2
-    alpha = 0
 
     r_r = r_1 @ r_1 + r_2 @ r_2
 
     iter = 0
-    while r_r > 1e-8:
-        if iter == 100:
-            break
+    max_iter = 100
+    while r_r > 1e-5 and iter < max_iter:
         iter += 1
-        # print(r_r)
-        alpha = r_r / yAx(p_1, p_2, H_11, H_12, H_22, p_1, p_2)
+        alpha = r_r / yAx(p_1, p_2, H_11_left, H_11_right, H_12_left, H_12_right, H_22_left, H_22_right, p_1, p_2, d1x_d1x, d1x_d1y, d1y_d1y)
 
         x_1 = x_1 + alpha * p_1
         x_2 = x_2 + alpha * p_2
 
-        r_new_1, r_new_2 = b_Ax(H_11, H_12, H_22, x_1, x_2, b_1, b_2)
+        r_new_1, r_new_2 = b_Ax(H_11_left, H_11_right, H_12_left, H_12_right, H_22_left, H_22_right, x_1, x_2, b_1, b_2, d1x_d1x, d1x_d1y, d1y_d1y)
         r_new_r_new = r_new_1 @ r_new_1 + r_new_2 @ r_new_2
         beta = r_new_r_new / r_r
 
@@ -664,7 +672,7 @@ def solve_LS_cg(H_11, H_12, H_22, x_1, x_2, b_1, b_2):
         p_2 = r_new_2 + beta * p_2
 
         r_r = r_new_r_new
-    
+
     return x_1.transpose('l', 'r', 'p').data, x_2.transpose('l', 'r', 'p').data
 
 
@@ -708,7 +716,7 @@ def solve_LS_cg_scipy(H_11, H_12, H_22, x_1, x_2, b_1, b_2):
 
 
 # time stepping function
-def single_time_step(U, V, Ax_MPS, Ay_MPS, Bx_MPS, By_MPS, chi_mpo, dt, Re, mu, d1x, d1y, d2x, d2y, d1x_d1x, d1x_d1y, d1y_d1y, U_d1x_d1x_U_left, U_d1x_d1x_U_right, U_d1x_d1y_V_left, U_d1x_d1y_V_right, V_d1y_d1y_V_left, V_d1y_d1y_V_right):
+def single_time_step(U, V, Ax_MPS, Ay_MPS, Bx_MPS, By_MPS, chi_mpo, dt, Re, mu, d1x, d1y, d2x, d2y, d1x_d1x, d1x_d1y, d1y_d1y, U_d1x_d1x_U_left, U_d1x_d1x_U_right, U_d1x_d1y_V_left, U_d1x_d1y_V_right, V_d1y_d1y_V_left, V_d1y_d1y_V_right, solver='cg'):
     
     # initialize precontracted left and right networks
     U_Ax_left, U_Ax_right = get_precontracted_LR_mps_mps(U, Ax_MPS, 0)
@@ -740,9 +748,10 @@ def single_time_step(U, V, Ax_MPS, Ay_MPS, Bx_MPS, By_MPS, chi_mpo, dt, Re, mu, 
     V_Byd1y_By_left, V_Byd1y_By_right = get_precontracted_LR_mps_mpo(V, Byd1y, By_MPS, 0)
     V_d1yBy_By_left, V_d1yBy_By_right = get_precontracted_LR_mps_mpo(V, d1yBy, By_MPS, 0)
 
-    epsilon = 1e-8              # convergence criterion
+    epsilon = 1e-5              # convergence criterion
     E_0 = 1e-10                 # initialize energy before
-    E_1 = 2*epsilon             # initialize energy after
+    # E_1 = 2*epsilon             # initialize energy after
+    E_1 = U @ U + V @ V
 
     # helper function to compute convection-diffusion terms
     def conv_diff(left_tn, right_tn, A_t, W_t):
@@ -837,37 +846,31 @@ def single_time_step(U, V, Ax_MPS, Ay_MPS, Bx_MPS, By_MPS, chi_mpo, dt, Re, mu, 
             b_2 += -dt/2 * conv_diff(V_Byd1y_By_left[i], V_Byd1y_By_right[i], By_MPS_i, Byd1y_i)
             b_2 += -dt/2 * conv_diff(V_d1yBy_By_left[i], V_d1yBy_By_right[i], By_MPS_i, d1yBy_i)
 
-            # H matrix terms
-            H_11 = H_terms(U_d1x_d1x_U_left[i], U_d1x_d1x_U_right[i], d1x_d1x_i)
-            H_12 = H_terms(U_d1x_d1y_V_left[i], U_d1x_d1y_V_right[i], d1x_d1y_i)
-            H_22 = H_terms(V_d1y_d1y_V_left[i], V_d1y_d1y_V_right[i], d1y_d1y_i)
+            # solve linear system
+            if solver == 'cg':
+                x_1 = extract_tensor(U_trial, i)
+                x_2 = extract_tensor(V_trial, i)
+                x_1.reindex({x_1.inds[0]: 'l', x_1.inds[1]: 'r', x_1.inds[2]: 'p'}, inplace=True).transpose('l', 'p', 'r', inplace=True)
+                x_2.reindex({x_2.inds[0]: 'l', x_2.inds[1]: 'r', x_2.inds[2]: 'p'}, inplace=True).transpose('l', 'p', 'r', inplace=True)
+                U_new, V_new = solve_LS_cg(U_d1x_d1x_U_left[i], U_d1x_d1x_U_right[i], U_d1x_d1y_V_left[i], U_d1x_d1y_V_right[i], V_d1y_d1y_V_left[i], V_d1y_d1y_V_right[i], x_1, x_2, mu*dt**2 * d1x_d1x_i, mu*dt**2 * d1x_d1y_i, mu*dt**2 * d1y_d1y_i, b_1, b_2)
+            elif solver == 'inv':
+                H_11 = H_terms(U_d1x_d1x_U_left[i], U_d1x_d1x_U_right[i], d1x_d1x_i)
+                H_12 = H_terms(U_d1x_d1y_V_left[i], U_d1x_d1y_V_right[i], d1x_d1y_i)
+                H_22 = H_terms(V_d1y_d1y_V_left[i], V_d1y_d1y_V_right[i], d1y_d1y_i)
 
-            # use the current tensor parameters as initial guess
-            x_1 = extract_tensor(U_trial, i)
-            x_2 = extract_tensor(V_trial, i)
-            x_1.reindex({x_1.inds[0]: 'l', x_1.inds[1]: 'r', x_1.inds[2]: 'p'}, inplace=True).transpose('l', 'p', 'r', inplace=True)
-            x_2.reindex({x_2.inds[0]: 'l', x_2.inds[1]: 'r', x_2.inds[2]: 'p'}, inplace=True).transpose('l', 'p', 'r', inplace=True)
+                U_new, V_new = solve_LS_inv(H_11, H_12, H_22, b_1, b_2) 
+            elif solver == 'scipy.cg':
+                H_11 = H_terms(U_d1x_d1x_U_left[i], U_d1x_d1x_U_right[i], d1x_d1x_i)
+                H_12 = H_terms(U_d1x_d1y_V_left[i], U_d1x_d1y_V_right[i], d1x_d1y_i)
+                H_22 = H_terms(V_d1y_d1y_V_left[i], V_d1y_d1y_V_right[i], d1y_d1y_i)
+                x_1 = extract_tensor(U_trial, i)
+                x_2 = extract_tensor(V_trial, i)
+                x_1.reindex({x_1.inds[0]: 'l', x_1.inds[1]: 'r', x_1.inds[2]: 'p'}, inplace=True).transpose('l', 'p', 'r', inplace=True)
+                x_2.reindex({x_2.inds[0]: 'l', x_2.inds[1]: 'r', x_2.inds[2]: 'p'}, inplace=True).transpose('l', 'p', 'r', inplace=True)
 
-            np.save("H_11.npy", H_11.data)
-            print(H_11.inds)
-            np.save("H_12.npy", H_12.data)
-            print(H_12.inds)
-            np.save("H_22.npy", H_22.data)
-            print(H_22.inds)
-            np.save("b_1.npy", b_1.data)
-            print(b_1.inds)
-            np.save("b_2.npy", b_2.data)
-            print(b_2.inds)
-            np.save("x_1.npy", x_1.data)
-            print(x_1.inds)
-            np.save("x_2.npy", x_2.data)
-            print(x_2.inds)
-            sys.exit()
-            # np.save(".H_11.npy", np.array(V.arrays, dtype=object))
-
-            # U_new, V_new = solve_LS_cg_scipy(H_11, H_12, H_22, x_1, x_2, b_1, b_2)    # solve via scipy.cg
-            # U_new, V_new = solve_LS_cg(H_11, H_12, H_22, x_1, x_2, b_1, b_2)            # solve via self implemented conjugate gradient
-            U_new, V_new = solve_LS_inv(H_11, H_12, H_22, b_1, b_2)                   # solve via matrix inversion
+                U_new, V_new = solve_LS_cg_scipy(H_11, H_12, H_22, x_1, x_2, b_1, b_2)
+            else:
+                raise Exception(f"The solver '{solver}' is not known. Please use 'cg', 'inv', or 'scipy.cg' instead.")
 
             # update MPSs and precontracted networks
             # update MPS
@@ -967,20 +970,31 @@ def single_time_step(U, V, Ax_MPS, Ay_MPS, Bx_MPS, By_MPS, chi_mpo, dt, Re, mu, 
             b_2 += -dt/2 * conv_diff(V_Byd1y_By_left[i], V_Byd1y_By_right[i], By_MPS_i, Byd1y_i)
             b_2 += -dt/2 * conv_diff(V_d1yBy_By_left[i], V_d1yBy_By_right[i], By_MPS_i, d1yBy_i)
 
-            # H matrix terms
-            H_11 = H_terms(U_d1x_d1x_U_left[i], U_d1x_d1x_U_right[i], d1x_d1x_i)
-            H_12 = H_terms(U_d1x_d1y_V_left[i], U_d1x_d1y_V_right[i], d1x_d1y_i)
-            H_22 = H_terms(V_d1y_d1y_V_left[i], V_d1y_d1y_V_right[i], d1y_d1y_i)
+            # solve linear system
+            if solver == 'cg':
+                x_1 = extract_tensor(U_trial, i)
+                x_2 = extract_tensor(V_trial, i)
+                x_1.reindex({x_1.inds[0]: 'l', x_1.inds[1]: 'r', x_1.inds[2]: 'p'}, inplace=True).transpose('l', 'p', 'r', inplace=True)
+                x_2.reindex({x_2.inds[0]: 'l', x_2.inds[1]: 'r', x_2.inds[2]: 'p'}, inplace=True).transpose('l', 'p', 'r', inplace=True)
+                U_new, V_new = solve_LS_cg(U_d1x_d1x_U_left[i], U_d1x_d1x_U_right[i], U_d1x_d1y_V_left[i], U_d1x_d1y_V_right[i], V_d1y_d1y_V_left[i], V_d1y_d1y_V_right[i], x_1, x_2, mu*dt**2 * d1x_d1x_i, mu*dt**2 * d1x_d1y_i, mu*dt**2 * d1y_d1y_i, b_1, b_2)
+            elif solver == 'inv':
+                H_11 = H_terms(U_d1x_d1x_U_left[i], U_d1x_d1x_U_right[i], d1x_d1x_i)
+                H_12 = H_terms(U_d1x_d1y_V_left[i], U_d1x_d1y_V_right[i], d1x_d1y_i)
+                H_22 = H_terms(V_d1y_d1y_V_left[i], V_d1y_d1y_V_right[i], d1y_d1y_i)
 
-            # use the current tensor parameters as initial guess
-            x_1 = extract_tensor(U_trial, i)
-            x_2 = extract_tensor(V_trial, i)
-            x_1.reindex({x_1.inds[0]: 'l', x_1.inds[1]: 'r', x_1.inds[2]: 'p'}, inplace=True).transpose('l', 'p', 'r', inplace=True)
-            x_2.reindex({x_2.inds[0]: 'l', x_2.inds[1]: 'r', x_2.inds[2]: 'p'}, inplace=True).transpose('l', 'p', 'r', inplace=True)
+                U_new, V_new = solve_LS_inv(H_11, H_12, H_22, b_1, b_2) 
+            elif solver == 'scipy.cg':
+                H_11 = H_terms(U_d1x_d1x_U_left[i], U_d1x_d1x_U_right[i], d1x_d1x_i)
+                H_12 = H_terms(U_d1x_d1y_V_left[i], U_d1x_d1y_V_right[i], d1x_d1y_i)
+                H_22 = H_terms(V_d1y_d1y_V_left[i], V_d1y_d1y_V_right[i], d1y_d1y_i)
+                x_1 = extract_tensor(U_trial, i)
+                x_2 = extract_tensor(V_trial, i)
+                x_1.reindex({x_1.inds[0]: 'l', x_1.inds[1]: 'r', x_1.inds[2]: 'p'}, inplace=True).transpose('l', 'p', 'r', inplace=True)
+                x_2.reindex({x_2.inds[0]: 'l', x_2.inds[1]: 'r', x_2.inds[2]: 'p'}, inplace=True).transpose('l', 'p', 'r', inplace=True)
 
-            # U_new, V_new = solve_LS_cg_scipy(H_11, H_12, H_22, x_1, x_2, b_1, b_2)    # solve via scipy.cg
-            U_new, V_new = solve_LS_cg(H_11, H_12, H_22, x_1, x_2, b_1, b_2)            # solve via self implemented conjugate gradient
-            # U_new, V_new = solve_LS_inv(H_11, H_12, H_22, b_1, b_2)                   # solve via matrix inversion
+                U_new, V_new = solve_LS_cg_scipy(H_11, H_12, H_22, x_1, x_2, b_1, b_2)
+            else:
+                raise Exception(f"The solver '{solver}' is not known. Please use 'cg', 'inv', or 'scipy.cg' instead.")
 
             # update MPSs and precontracted networks
             # update MPS
@@ -1065,7 +1079,7 @@ def plot(U, V, time=-1, full=False, save_path=None, show=False):
 
 
 # time evolution algorithm
-def time_evolution(U, V, chi, chi_mpo, dt, T, Re, mu, save_path):
+def time_evolution(U, V, chi_mpo, dt, T, Re, mu, save_path, solver='cg'):
     n = U.L
     dx = 1 / (2**n - 1)
     n_steps = int(np.ceil(T/dt))    # time steps
@@ -1097,10 +1111,10 @@ def time_evolution(U, V, chi, chi_mpo, dt, T, Re, mu, save_path):
     t = 0
     for step in range(n_steps):   # for every time step dt
         print(f"Step = {step} - Time = {t}", end='\n')
-        if step%20 == 0:
-            plot(U, V, time=t, save_path=f"{save_path}/step_{step}.png", show=False)
-            np.save(f"{save_path}/u_step_{step}.npy", np.array(U.arrays, dtype=object))
-            np.save(f"{save_path}/v_step_{step}.npy", np.array(V.arrays, dtype=object))
+        # if step%20 == 0:
+        #     plot(U, V, time=t, save_path=f"{save_path}/step_{step}.png", show=False)
+        #     np.save(f"{save_path}/u_step_{step}.npy", np.array(U.arrays, dtype=object))
+        #     np.save(f"{save_path}/v_step_{step}.npy", np.array(V.arrays, dtype=object))
 
         U_trial = copy_mps(U)          # trial velocity state
         V_trial = copy_mps(V)          # trial velocity state
@@ -1115,17 +1129,17 @@ def time_evolution(U, V, chi, chi_mpo, dt, T, Re, mu, save_path):
         V_prev_copy = copy_mps(V)           # previous velocity state
 
         # Midpoint RK-2 step
-        # U_mid, V_mid = single_time_step(U_trial, V_trial, U_prev, V_prev, U_prev_copy, V_prev_copy, chi_mpo, dt/2, Re, mu, d1x, d1y, d2x, d2y, d1x_d1x, d1x_d1y, d1y_d1y, U_d1x_d1x_U_left, U_d1x_d1x_U_right, U_d1x_d1y_V_left, U_d1x_d1y_V_right, V_d1y_d1y_V_left, V_d1y_d1y_V_right)
+        U_mid, V_mid = single_time_step(U_trial, V_trial, U_prev, V_prev, U_prev_copy, V_prev_copy, chi_mpo, dt/2, Re, mu, d1x, d1y, d2x, d2y, d1x_d1x, d1x_d1y, d1y_d1y, U_d1x_d1x_U_left, U_d1x_d1x_U_right, U_d1x_d1y_V_left, U_d1x_d1y_V_right, V_d1y_d1y_V_left, V_d1y_d1y_V_right, solver=solver)
         # Full RK-2 step
         print('')
-        # U, V = single_time_step(U_trial, V_trial, U_prev, V_prev, U_mid, V_mid, chi_mpo, dt, Re, mu, d1x, d1y, d2x, d2y, d1x_d1x, d1x_d1y, d1y_d1y, U_d1x_d1x_U_left, U_d1x_d1x_U_right, U_d1x_d1y_V_left, U_d1x_d1y_V_right, V_d1y_d1y_V_left, V_d1y_d1y_V_right)
-        U, V = single_time_step(U_trial, V_trial, U_prev, V_prev, U_prev_copy, V_prev_copy, chi_mpo, dt, Re, mu, d1x, d1y, d2x, d2y, d1x_d1x, d1x_d1y, d1y_d1y, U_d1x_d1x_U_left, U_d1x_d1x_U_right, U_d1x_d1y_V_left, U_d1x_d1y_V_right, V_d1y_d1y_V_left, V_d1y_d1y_V_right)
+        U, V = single_time_step(U_trial, V_trial, U_prev, V_prev, U_mid, V_mid, chi_mpo, dt, Re, mu, d1x, d1y, d2x, d2y, d1x_d1x, d1x_d1y, d1y_d1y, U_d1x_d1x_U_left, U_d1x_d1x_U_right, U_d1x_d1y_V_left, U_d1x_d1y_V_right, V_d1y_d1y_V_left, V_d1y_d1y_V_right, solver=solver)
+        # U, V = single_time_step(U_trial, V_trial, U_prev, V_prev, U_prev_copy, V_prev_copy, chi_mpo, dt, Re, mu, d1x, d1y, d2x, d2y, d1x_d1x, d1x_d1y, d1y_d1y, U_d1x_d1x_U_left, U_d1x_d1x_U_right, U_d1x_d1y_V_left, U_d1x_d1y_V_right, V_d1y_d1y_V_left, V_d1y_d1y_V_right)
         print('\n')
         t += dt
     
-    plot(U, V, time=t, save_path=f"{save_path}/final.png", show=False)
-    np.save(f"{save_path}/u_final.npy", np.array(U.arrays, dtype=object))
-    np.save(f"{save_path}/v_final.npy", np.array(V.arrays, dtype=object))
+    # plot(U, V, time=t, save_path=f"{save_path}/final.png", show=False)
+    # np.save(f"{save_path}/u_final.npy", np.array(U.arrays, dtype=object))
+    # np.save(f"{save_path}/v_final.npy", np.array(V.arrays, dtype=object))
         
 
 

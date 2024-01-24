@@ -1,1 +1,0 @@
-{"n_bits": 10, "L": 1, "chi": 33, "chi_mpo": 33, "T": 0.5, "mu": 250000.0, "Re": 200000.0, "path": "/raid/home/q556220/dev/TN_CFD/2D_TDJ/cuTensorNet/temp", "solver": "cg"}

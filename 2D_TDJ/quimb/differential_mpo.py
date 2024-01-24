@@ -26,7 +26,7 @@ def Diff_1_2_y_MPO(n, dx):
     central_node[1, 0, 0, 2] = 1    # 01 -> 00 no carry (0)
     central_node[2, 2, 3, 2] = 1    # 10 -> 11 carry for substraction (2)
     central_node[3, 0, 2, 2] = 1    # 11 -> 10 no carry(0)
-    right_terminator = 1/dx*np.array([0, 1/2, -1/2]).reshape(3, 1) # coefficients
+    right_terminator = 1/dx*np.array([0, -1/2, 1/2]).reshape(3, 1) # coefficients
 
     # Define arrays for MPO
     left_node = np.matmul(left_terminator, central_node.transpose(1, 0, 2, 3).reshape(3, -1)).reshape(4, 4, 3)
@@ -62,7 +62,7 @@ def Diff_1_2_x_MPO(n, dx):
     central_node[1, 2, 3, 2] = 1    # 01 -> 11 carry for substraction (2)
     central_node[2, 0, 0, 2] = 1    # 10 -> 00 no carry (0)
     central_node[3, 0, 1, 2] = 1    # 11 -> 01 no carry (0)
-    right_terminator = 1/dx*np.array([0, 1/2, -1/2]).reshape(3, 1) # coefficients
+    right_terminator = 1/dx*np.array([0, -1/2, 1/2]).reshape(3, 1) # coefficients
 
     # Define arrays for MPO
     left_node = np.matmul(left_terminator, central_node.transpose(1, 0, 2, 3).reshape(3, -1)).reshape(4, 4, 3)
@@ -244,7 +244,7 @@ def Diff_1_8_y_MPO(n, dx):
     last_node[2, 4, 2, 5] = -1   # 10 -> 10 carry for substraction one further (4)
     last_node[3, 4, 3, 5] = -1   # 11 -> 11 carry for substraction one further (4)
     # right terminator
-    right_terminator = 1/dx*np.array([0, 4/5, -4/5, -1/5, 4/105, -1/280]).reshape(6, 1) # coefficients
+    right_terminator = 1/dx*np.array([0, -4/5, 4/5, 1/5, -4/105, 1/280]).reshape(6, 1) # coefficients
 
     # Define arrays for MPO
     left_node = np.matmul(left_terminator, central_node.transpose(1, 0, 2, 3).reshape(3, -1)).reshape(4, 4, 3)
@@ -354,7 +354,7 @@ def Diff_1_8_x_MPO(n, dx):
     last_node[2, 4, 2, 5] = -1   # 10 -> 10 carry for substraction one further (4)
     last_node[3, 4, 3, 5] = -1   # 11 -> 11 carry for substraction one further (4)
     # right terminator
-    right_terminator = 1/dx*np.array([0, 4/5, -4/5, -1/5, 4/105, -1/280]).reshape(6, 1) # coefficients
+    right_terminator = 1/dx*np.array([0, -4/5, 4/5, 1/5, -4/105, 1/280]).reshape(6, 1) # coefficients
 
     # Define arrays for MPO
     left_node = np.matmul(left_terminator, central_node.transpose(1, 0, 2, 3).reshape(3, -1)).reshape(4, 4, 3)
