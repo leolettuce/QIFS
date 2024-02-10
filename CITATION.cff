@@ -1,0 +1,16 @@
+# This CITATION.cff file was generated with cffinit.
+# Visit https://bit.ly/cffinit to generate yours today!
+
+cff-version: 1.2.0
+title: Tensor Network - CFD
+message: >-
+  If you use this software, please cite it using the
+  metadata from this file.
+type: software
+authors:
+  - given-names: Leonhard
+    family-names: Hölscher
+    email: leonhard.hoelscher@bmw.de
+    affiliation: BMW
+repository-code: 'https://github.com/leolettuce/TN_CFD'
+abstract: CFD simulations using Tensor Network encoding.
