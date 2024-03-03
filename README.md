@@ -1,13 +1,17 @@
-# TN_CFD
+# QIFS - Quantum-Inspired Fluid Simulations
 CFD simulations using Tensor Network encoding.
-Starting point https://www.nature.com/articles/s43588-021-00181-1
+This repository contains the implementations of the Quantum-Inspired CFD Algorithm of the paper: [Insert arXiv link]
 
-## Folder 2D_TDJ 
-In "direct_numerical_simulation.ipynb" the DNS scheme for the "temporally developing jet" problem is demonstrated. The method itself is explained in https://doi.org/10.1016/j.cpc.2016.02.023
-Next steps: Calculate pressure from velocity field or use different projection method? Define new problem with no-slip boundary conditions (turbulent channel flow?). How do we encode boundaries of objects in the finite difference method? Should we use finite volumes instead? 
+## 2D_QIS
+Here, you find the implementations for 2D Quantum-Inspired Simulations (QIS).
 
-In "MPS_simulation.ipynb" the encoding of the velocityfield into the MPS representation is outlined. The scale resolving encoding is expalined in the original paper. Differentiation operators are not defined yet. 
-Next steps: Try tensor networks library (quimb or cutensor?).
+## 2D_DNS
+Here, you find the implementations for 2D Direct Numerical Simulations (DNS).
 
-## Folder miscellaneous
-Old code versions which could help in the future.
+The algorithm was introduced in this paper by Gourianov et al.:
+A quantum-inspired approach to exploit turbulence structures
+https://www.nature.com/articles/s43588-021-00181-1
+
+
+Feel free to play around with the code and contact me.
+Have fun!

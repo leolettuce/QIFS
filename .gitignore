@@ -1,0 +1,6 @@
+# ignore large files
+/Analysis/Energy_Spectrum_Analysis/DT/velocity_12_10000000.0_1.992187499998723.npy
+/Analysis/Energy_Spectrum_Analysis/DT/velocity_11_10000000.0_1.992187499999258.npy
+
+/Analysis/Energy_Spectrum_Analysis/DJ/velocity_12_10000000.0_1.992187499998723.npy
+/Analysis/Energy_Spectrum_Analysis/DJ/velocity_11_10000000.0_1.992187499999258.npy

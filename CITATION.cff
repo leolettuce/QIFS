@@ -2,15 +2,15 @@
 # Visit https://bit.ly/cffinit to generate yours today!
 
 cff-version: 1.2.0
-title: Tensor Network - CFD
+title: QIFS - Quantum-Inspired Fluid Simulations
 message: >-
   If you use this software, please cite it using the
   metadata from this file.
 type: software
 authors:
   - given-names: Leonhard
-    family-names: Hölscher
+    family-names: Hoelscher
     email: leonhard.hoelscher@bmw.de
     affiliation: BMW
-repository-code: 'https://github.com/leolettuce/TN_CFD'
+repository-code: 'https://github.com/leolettuce/QIFS'
 abstract: CFD simulations using Tensor Network encoding.
