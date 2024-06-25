@@ -12,7 +12,6 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 
-# All functions relevant for the simulation of the 2D TDJ problem with MPS
 import numpy as np
 from scipy.sparse.linalg import svds as truncated_svd
 from scipy.linalg import svd as plain_svd
@@ -22,9 +21,8 @@ import sys
 import matplotlib.pyplot as plt
 from differential_mpo import *
 from differential_operators_numpy import *
+import time, json
 
-
-# Initial conditions for TDJ
 def J(X, Y, u_0, y_min=0.4, y_max=0.6, h = 0.005):
     return u_0/2*(np.tanh((Y-y_min)/h)-np.tanh((Y-y_max)/h)-1), np.zeros_like(Y)
 
@@ -45,7 +43,7 @@ def D(X, Y, u_0, y_min, y_max, h, L_box):
 
 
 def initial_fields(L, N, y_min, y_max, h, u_max):
-    # generate fields according to the initial conditions of the 2TDJ problem
+    # generate fields according to the initial conditions of the DJ problem
     dx = L/(N-1)    # dx=dy
 
     # create 2D grid
@@ -53,7 +51,7 @@ def initial_fields(L, N, y_min, y_max, h, u_max):
     y = np.linspace(0, L-dx, N)
     Y, X = np.meshgrid(y, x)
 
-    # load initial conditions for TDJ
+    # load initial conditions for DJ
     U, V = J(X, Y, u_max, y_min, y_max, h)
     dU, dV = D(X, Y, u_max, y_min, y_max, h, L)
     U = U + dU
@@ -232,7 +230,7 @@ def hadamard_product_MPO(a_MPS, chi):
     data = list(temp_MPS.arrays)    # convert TN to list of np.arrays in order to convert it to quimb MPO
     data[0] = data[0].transpose((1, 2, 0))   # reorder indices for first tensor (quimb speciality)
     result_MPO = qu.tensor.MatrixProductOperator(data, shape='udlr')    # create quimb MPO
-    result_MPO.compress(max_bond=chi)
+    result_MPO.compress(max_bond=chi, cutoff=1e-30)
     
     return result_MPO   # return the MPO
 
@@ -570,39 +568,39 @@ def cost_function(U, V, Ax_MPS, Ay_MPS, Bx_MPS, By_MPS, chi, dt, Re, mu, n, dx):
     
     # create MPOs for convection-diffusion terms
     Bx_MPO = hadamard_product_MPO(copy_mps(Bx_MPS), chi)
-    Bxd1x = Bx_MPO.apply(d1x, compress=True)
-    d1xBx = d1x.apply(Bx_MPO, compress=True)
+    Bxd1x = Bx_MPO.apply(d1x, compress=True, max_bond=chi, cutoff=1e-30)
+    d1xBx = d1x.apply(Bx_MPO, compress=True, max_bond=chi, cutoff=1e-30)
     By_MPO = hadamard_product_MPO(copy_mps(By_MPS), chi)
-    Byd1y = By_MPO.apply(d1y, compress=True)
-    d1yBy = d1y.apply(By_MPO, compress=True)
+    Byd1y = By_MPO.apply(d1y, compress=True, max_bond=chi, cutoff=1e-30)
+    d1yBy = d1y.apply(By_MPO, compress=True, max_bond=chi, cutoff=1e-30)
 
     cost_c = 0
 
     # continuity equation
-    continuity_state = (d1x.apply(U, compress=True, max_bond=chi) + d1y.apply(V, compress=True, max_bond=chi))
+    continuity_state = (d1x.apply(U, compress=True, max_bond=chi, cutoff=1e-30) + d1y.apply(V, compress=True, max_bond=chi, cutoff=1e-30))
     cost_c += mu * (continuity_state.H @ continuity_state)
 
     cost_m = 0
 
     # momentum equation for x
     momentum_x = (U-Ax_MPS)/dt
-    momentum_x += 0.5 * Bxd1x.apply(Bx_MPS, compress=True, max_bond=chi)
-    momentum_x += 0.5 * d1xBx.apply(Bx_MPS, compress=True, max_bond=chi)
-    momentum_x += 0.5 * Byd1y.apply(Bx_MPS, compress=True, max_bond=chi)
-    momentum_x += 0.5 * d1yBy.apply(Bx_MPS, compress=True, max_bond=chi)
-    momentum_x += -1/Re * d2x.apply(Bx_MPS, compress=True, max_bond=chi)
-    momentum_x += -1/Re * d2y.apply(Bx_MPS, compress=True, max_bond=chi)
+    momentum_x += 0.5 * Bxd1x.apply(Bx_MPS, compress=True, max_bond=chi, cutoff=1e-30)
+    momentum_x += 0.5 * d1xBx.apply(Bx_MPS, compress=True, max_bond=chi, cutoff=1e-30)
+    momentum_x += 0.5 * Byd1y.apply(Bx_MPS, compress=True, max_bond=chi, cutoff=1e-30)
+    momentum_x += 0.5 * d1yBy.apply(Bx_MPS, compress=True, max_bond=chi, cutoff=1e-30)
+    momentum_x += -1/Re * d2x.apply(Bx_MPS, compress=True, max_bond=chi, cutoff=1e-30)
+    momentum_x += -1/Re * d2y.apply(Bx_MPS, compress=True, max_bond=chi, cutoff=1e-30)
 
     cost_m += momentum_x.H @ momentum_x
 
     # momentum equation for y
     momentum_y = (V-Ay_MPS)/dt
-    momentum_y += 0.5 * Bxd1x.apply(By_MPS, compress=True, max_bond=chi)
-    momentum_y += 0.5 * d1xBx.apply(By_MPS, compress=True, max_bond=chi)
-    momentum_y += 0.5 * Byd1y.apply(By_MPS, compress=True, max_bond=chi)
-    momentum_y += 0.5 * d1yBy.apply(By_MPS, compress=True, max_bond=chi)
-    momentum_y += -1/Re * d2x.apply(By_MPS, compress=True, max_bond=chi)
-    momentum_y += -1/Re * d2y.apply(By_MPS, compress=True, max_bond=chi)
+    momentum_y += 0.5 * Bxd1x.apply(By_MPS, compress=True, max_bond=chi, cutoff=1e-30)
+    momentum_y += 0.5 * d1xBx.apply(By_MPS, compress=True, max_bond=chi, cutoff=1e-30)
+    momentum_y += 0.5 * Byd1y.apply(By_MPS, compress=True, max_bond=chi, cutoff=1e-30)
+    momentum_y += 0.5 * d1yBy.apply(By_MPS, compress=True, max_bond=chi, cutoff=1e-30)
+    momentum_y += -1/Re * d2x.apply(By_MPS, compress=True, max_bond=chi, cutoff=1e-30)
+    momentum_y += -1/Re * d2y.apply(By_MPS, compress=True, max_bond=chi, cutoff=1e-30)
 
     cost_m += momentum_y.H @ momentum_y
 
@@ -740,11 +738,11 @@ def single_time_step(U, V, Ax_MPS, Ay_MPS, Bx_MPS, By_MPS, chi_mpo, dt, Re, mu, 
 
     # create MPOs for convection-diffusion terms
     Bx_MPO = hadamard_product_MPO(copy_mps(Bx_MPS), chi_mpo)
-    Bxd1x = Bx_MPO.apply(d1x, compress=True, max_bond=chi_mpo)
-    d1xBx = d1x.apply(Bx_MPO, compress=True, max_bond=chi_mpo)
+    Bxd1x = Bx_MPO.apply(d1x, compress=True, max_bond=chi_mpo, cutoff=1e-30)
+    d1xBx = d1x.apply(Bx_MPO, compress=True, max_bond=chi_mpo, cutoff=1e-30)
     By_MPO = hadamard_product_MPO(copy_mps(By_MPS), chi_mpo)
-    Byd1y = By_MPO.apply(d1y, compress=True, max_bond=chi_mpo)
-    d1yBy = d1y.apply(By_MPO, compress=True, max_bond=chi_mpo)
+    Byd1y = By_MPO.apply(d1y, compress=True, max_bond=chi_mpo, cutoff=1e-30)
+    d1yBy = d1y.apply(By_MPO, compress=True, max_bond=chi_mpo, cutoff=1e-30)
 
     # convection-diffusion terms for x direction (prefactors not included)
     U_d2x_Bx_left, U_d2x_Bx_right = get_precontracted_LR_mps_mpo(U, d2x, Bx_MPS, 0)
@@ -1093,7 +1091,7 @@ def plot(U, V, time=-1, full=False, save_path=None, show=False):
 
 
 # time evolution algorithm
-def time_evolution(U, V, chi_mpo, dt, T, Re, mu, save_path, solver='cg'):
+def time_evolution(U, V, chi, chi_mpo, dt, T, Re, mu, save_path, solver='cg', comp_time_path=None):
     n = U.L
     dx = 1 / (2**n - 1)
     n_steps = int(np.ceil(T/dt))    # time steps
@@ -1109,19 +1107,15 @@ def time_evolution(U, V, chi_mpo, dt, T, Re, mu, save_path, solver='cg'):
     # d2x = Diff_2_2_x_MPO(n, dx)
     # d2y = Diff_2_2_y_MPO(n, dx)
 
-    d1x_d1x = d1x.apply(d1x, compress=True)
-    d1x_d1y = d1x.apply(d1y, compress=True)
-    d1y_d1y = d1y.apply(d1y, compress=True)
+    d1x_d1x = d1x.apply(d1x, compress=True, max_bond=chi, cutoff=1e-30)
+    d1x_d1y = d1x.apply(d1y, compress=True, max_bond=chi, cutoff=1e-30)
+    d1y_d1y = d1y.apply(d1y, compress=True, max_bond=chi, cutoff=1e-30)
     
     # bring the orthogonality center to the first tensor
     U.right_canonize()
     V.right_canonize()
 
-    # initialize precontracted left and right networks
-    U_d1x_d1x_U_left, U_d1x_d1x_U_right = get_precontracted_LR_mps_mpo(U, d1x_d1x, copy_mps(U), 0)
-    U_d1x_d1y_V_left, U_d1x_d1y_V_right = get_precontracted_LR_mps_mpo(U, d1x_d1y, V, 0)
-    V_d1y_d1y_V_left, V_d1y_d1y_V_right = get_precontracted_LR_mps_mpo(V, d1y_d1y, copy_mps(V), 0)
-
+    comp_time = {}
     t = 0
     for step in range(n_steps):   # for every time step dt
         print(f"Step = {step} - Time = {t}", end='\n')
@@ -1133,22 +1127,158 @@ def time_evolution(U, V, chi_mpo, dt, T, Re, mu, save_path, solver='cg'):
         U_trial = copy_mps(U)          # trial velocity state
         V_trial = copy_mps(V)          # trial velocity state
 
-        # U_trial = rand_mps_like(U)
-        # V_trial = rand_mps_like(V)
-
-        U_prev = copy_mps(U)           # previous velocity state
-        V_prev = copy_mps(V)           # previous velocity state
-
-        U_prev_copy = copy_mps(U)           # previous velocity state
-        V_prev_copy = copy_mps(V)           # previous velocity state
-
         # Midpoint RK-2 step
-        U_mid, V_mid = single_time_step(U_trial, V_trial, U_prev, V_prev, U_prev_copy, V_prev_copy, chi_mpo, dt/2, Re, mu, d1x, d1y, d2x, d2y, d1x_d1x, d1x_d1y, d1y_d1y, U_d1x_d1x_U_left, U_d1x_d1x_U_right, U_d1x_d1y_V_left, U_d1x_d1y_V_right, V_d1y_d1y_V_left, V_d1y_d1y_V_right, solver=solver)
-        # Full RK-2 step
+        # U_mid, V_mid = single_time_step(U_trial, V_trial, U_prev, V_prev, U_prev_copy, V_prev_copy, chi_mpo, dt/2, Re, mu, d1x, d1y, d2x, d2y, d1x_d1x, d1x_d1y, d1y_d1y, U_d1x_d1x_U_left, U_d1x_d1x_U_right, U_d1x_d1y_V_left, U_d1x_d1y_V_right, V_d1y_d1y_V_left, V_d1y_d1y_V_right, solver=solver)
+        # # Full RK-2 step
+        # print('')
+        # U, V = single_time_step(U_trial, V_trial, U_prev, V_prev, U_mid, V_mid, chi_mpo, dt, Re, mu, d1x, d1y, d2x, d2y, d1x_d1x, d1x_d1y, d1y_d1y, U_d1x_d1x_U_left, U_d1x_d1x_U_right, U_d1x_d1y_V_left, U_d1x_d1y_V_right, V_d1y_d1y_V_left, V_d1y_d1y_V_right, solver=solver)
+        # # U, V = single_time_step(U_trial, V_trial, U_prev, V_prev, U_prev_copy, V_prev_copy, chi_mpo, dt, Re, mu, d1x, d1y, d2x, d2y, d1x_d1x, d1x_d1y, d1y_d1y, U_d1x_d1x_U_left, U_d1x_d1x_U_right, U_d1x_d1y_V_left, U_d1x_d1y_V_right, V_d1y_d1y_V_left, V_d1y_d1y_V_right)
+        # print('\n')
+
+        if comp_time_path is not None:
+            start = time.time()
+
+        # initialize precontracted left and right networks
+        U_d1x_d1x_U_left, U_d1x_d1x_U_right = get_precontracted_LR_mps_mpo(U, d1x_d1x, copy_mps(U), 0)
+        U_d1x_d1y_V_left, U_d1x_d1y_V_right = get_precontracted_LR_mps_mpo(U, d1x_d1y, V, 0)
+        V_d1y_d1y_V_left, V_d1y_d1y_V_right = get_precontracted_LR_mps_mpo(V, d1y_d1y, copy_mps(V), 0)
+
+        # RK4
+        U1_x, U1_y = single_time_step(
+            U_trial, 
+            V_trial, 
+            copy_mps(U)/4, 
+            copy_mps(V)/4, 
+            copy_mps(U), 
+            copy_mps(V),  
+            chi_mpo,
+            dt/6, 
+            Re,
+            mu,
+            d1x, 
+            d1y, 
+            d2x, 
+            d2y, 
+            d1x_d1x, 
+            d1x_d1y, 
+            d1y_d1y, 
+            U_d1x_d1x_U_left, 
+            U_d1x_d1x_U_right, 
+            U_d1x_d1y_V_left, 
+            U_d1x_d1y_V_right, 
+            V_d1y_d1y_V_left, 
+            V_d1y_d1y_V_right,
+            solver=solver
+            )
         print('')
-        U, V = single_time_step(U_trial, V_trial, U_prev, V_prev, U_mid, V_mid, chi_mpo, dt, Re, mu, d1x, d1y, d2x, d2y, d1x_d1x, d1x_d1y, d1y_d1y, U_d1x_d1x_U_left, U_d1x_d1x_U_right, U_d1x_d1y_V_left, U_d1x_d1y_V_right, V_d1y_d1y_V_left, V_d1y_d1y_V_right, solver=solver)
-        # U, V = single_time_step(U_trial, V_trial, U_prev, V_prev, U_prev_copy, V_prev_copy, chi_mpo, dt, Re, mu, d1x, d1y, d2x, d2y, d1x_d1x, d1x_d1y, d1y_d1y, U_d1x_d1x_U_left, U_d1x_d1x_U_right, U_d1x_d1y_V_left, U_d1x_d1y_V_right, V_d1y_d1y_V_left, V_d1y_d1y_V_right)
-        print('\n')
+        B_x = 3 * U1_x + U/4
+        B_y = 3 * U1_y + V/4
+        B_x.compress(max_bond=chi, cutoff=1e-30)
+        B_y.compress(max_bond=chi, cutoff=1e-30)
+        U2_x, U2_y = single_time_step(
+            U_trial, 
+            V_trial, 
+            copy_mps(U)/4, 
+            copy_mps(U)/4, 
+            B_x,
+            B_y,
+            chi_mpo,
+            dt/3, 
+            Re,
+            mu,
+            d1x, 
+            d1y, 
+            d2x, 
+            d2y, 
+            d1x_d1x, 
+            d1x_d1y, 
+            d1y_d1y, 
+            U_d1x_d1x_U_left, 
+            U_d1x_d1x_U_right, 
+            U_d1x_d1y_V_left, 
+            U_d1x_d1y_V_right, 
+            V_d1y_d1y_V_left, 
+            V_d1y_d1y_V_right, 
+            solver=solver
+            )
+        print('')
+        B_x = 1.5 * U2_x + 5/8 * U
+        B_y = 1.5 * U2_y + 5/8 * V
+        B_x.compress(max_bond=chi, cutoff=1e-30)
+        B_y.compress(max_bond=chi, cutoff=1e-30)
+        U3_x, U3_y = single_time_step(
+            U_trial, 
+            V_trial, 
+            copy_mps(U)/4,
+            copy_mps(V)/4,
+            B_x,
+            B_y,
+            chi_mpo,
+            dt/3, 
+            Re,
+            mu,
+            d1x, 
+            d1y, 
+            d2x, 
+            d2y, 
+            d1x_d1x, 
+            d1x_d1y, 
+            d1y_d1y, 
+            U_d1x_d1x_U_left, 
+            U_d1x_d1x_U_right, 
+            U_d1x_d1y_V_left, 
+            U_d1x_d1y_V_right, 
+            V_d1y_d1y_V_left, 
+            V_d1y_d1y_V_right, 
+            solver=solver
+            )
+        print('')
+        B_x = 3 * U3_x + U/4
+        B_y = 3 * U3_y + V/4
+        B_x.compress(max_bond=chi, cutoff=1e-30)
+        B_y.compress(max_bond=chi, cutoff=1e-30)
+        U4_x, U4_y = single_time_step(
+            U_trial, 
+            V_trial, 
+            copy_mps(U)/4,
+            copy_mps(V)/4,
+            B_x,
+            B_y,
+            chi_mpo,
+            dt/6, 
+            Re,
+            mu,
+            d1x, 
+            d1y, 
+            d2x, 
+            d2y, 
+            d1x_d1x, 
+            d1x_d1y, 
+            d1y_d1y, 
+            U_d1x_d1x_U_left, 
+            U_d1x_d1x_U_right, 
+            U_d1x_d1y_V_left, 
+            U_d1x_d1y_V_right, 
+            V_d1y_d1y_V_left, 
+            V_d1y_d1y_V_right, 
+            solver=solver
+            )
+        print('')
+        U = U1_x + U2_x + U3_x + U4_x
+        V = U1_y + U2_y + U3_y + U4_y
+        U.compress(max_bond=chi, cutoff=1e-30)
+        V.compress(max_bond=chi, cutoff=1e-30)
+
+        for tensor in U:
+            print(tensor.shape)
+
+        if comp_time_path is not None:
+            end = time.time()
+            comp_time[t] = end-start
+
+            with open(comp_time_path, "w") as outfile: 
+                json.dump(comp_time, outfile)
+
         t += dt
     
     # plot(U, V, time=t, save_path=f"{save_path}/final.png", show=False)

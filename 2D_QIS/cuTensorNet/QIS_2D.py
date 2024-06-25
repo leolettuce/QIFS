@@ -12,7 +12,7 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 
-# All functions relevant for the simulation of the 2D TDJ problem with MPS
+
 import numpy as np
 from scipy.sparse.linalg import cg
 import matplotlib.pyplot as plt
@@ -36,7 +36,6 @@ def get_gpu_memory():
     memory_free_values = [int(x.split()[0]) for i, x in enumerate(memory_free_info)]
     return memory_free_values
 
-
 class QI_CFD:
 
     def __init__(self):
@@ -59,9 +58,8 @@ class QI_CFD:
         self.save_number = 100
         self.meas_comp_time = False
         self.comp_time_path = None
-        self.meas_cg_iter = False
-        self.cg_iter_path = None
-        self.cg_iter_data = None
+        self.max_sweeps = 20
+        self.t = 0
 
         self.U_init = None
         self.V_init = None
@@ -82,16 +80,15 @@ class QI_CFD:
         self.solver = solver
         self.save_number = save_number
         print("Initialized parameters")
-
+    
 
     def enable_meas_comp_time(self, path):
         self.meas_comp_time = True
         self.comp_time_path = path
+    
 
-
-    def enable_meas_cg_iter(self, path):
-        self.meas_cg_iter = True
-        self.cg_iter_path = path
+    def copy_tn(self, tensor_list):
+        return [tensor.copy() for tensor in tensor_list]
 
 
     def multiply_mps_mpo(self, mps, mpo, algorithm, options=None):
@@ -170,7 +167,7 @@ class QI_CFD:
             return mps
 
 
-    # Initial conditions for TDJ
+    # Initial conditions for DJ
     def J(self, X, Y, u_0, y_min=0.4, y_max=0.6, h = 0.005):
         return u_0/2*(np.tanh((Y-y_min)/h)-np.tanh((Y-y_max)/h)-1), np.zeros_like(Y)
 
@@ -191,14 +188,14 @@ class QI_CFD:
 
 
     def initial_fields(self, y_min, y_max, h, u_max):
-        # generate fields according to the initial conditions of the 2TDJ problem
+        # generate fields according to the initial conditions of the DJ problem
 
         # create 2D grid
         x = np.linspace(0, self.L-self.dx, self.N)
         y = np.linspace(0, self.L-self.dx, self.N)
         Y, X = np.meshgrid(y, x)
 
-        # load initial conditions for TDJ
+        # load initial conditions for DJ
         U, V = self.J(X, Y, u_max, y_min, y_max, h)
         dU, dV = self.D(X, Y, u_max, y_min, y_max, h, self.L)
         U = U + dU
@@ -219,6 +216,23 @@ class QI_CFD:
         U, S, V = decompose('ij->ik,kj', mat, method=SVDMethod(max_extent=chi))
 
         return U, np.diag(S), V
+    
+
+    def compress_mps(self, input_mps, chi, curr_center=None, options=None):
+        mps = [tensor.copy() for tensor in input_mps]
+        mps = self.shift_canonical_center(mps, 0, curr_center)
+        n = len(mps)
+        t = mps[0]
+        mult_algorithm = {'qr_method': False, 'svd_method': {'partition': 'V', 'max_extent': chi}}
+        for i in range(1, n):
+            mps[i-1], _, t = contract_decompose('lpr,rPR->lpx,xPR', t, mps[i], algorithm=mult_algorithm, options=options)
+        mps[-1] = t
+        mult_algorithm = {'qr_method': False, 'svd_method': {'partition': 'U', 'max_extent': chi}}
+        for i in range(n-2, -1, -1):
+            t, _, mps[i+1] = contract_decompose('lpr,rPR->lpx,xPR', mps[i], t, algorithm=mult_algorithm, options=options)
+        mps[0] = t
+        
+        return mps
 
 
     def convert_to_MPS2D(self, A, chi=None):  
@@ -345,7 +359,7 @@ class QI_CFD:
         k_delta = cp.zeros((4, 4, 4), dtype='float64')  # initialize kronecker delta as np.array
         for i in range(4):
             k_delta[i, i, i] = 1    # only set variables to one where each index is the same
-        mpo = mps.copy()
+        mpo = self.copy_tn(mps)
         for i, tensor in enumerate(mpo):
             mpo[i] = contract('ijk, jlm->ilkm', tensor, k_delta, options=options)
         
@@ -385,8 +399,8 @@ class QI_CFD:
             else:
                 self.networks['g_p_L_mps_mps'][i].reset_operands(A, B, F)
 
-            F_new = self.networks['g_p_L_mps_mps'][i].contract()
-            self.networks['g_p_L_mps_mps'][i].workspace_ptr = None
+            F_new = self.networks['g_p_L_mps_mps'][i].contract(release_workspace=True)
+            # self.networks['g_p_L_mps_mps'][i].workspace_ptr = None
             # F_new = contract('apb, cpd, ac->bd', A, B, F, options=options, optimize=o)
             
             left_networks[i+1] = F_new
@@ -403,8 +417,8 @@ class QI_CFD:
             else:
                 self.networks['g_p_R_mps_mps'][i].reset_operands(A, B, F)
 
-            F_new = self.networks['g_p_R_mps_mps'][i].contract()
-            self.networks['g_p_R_mps_mps'][i].workspace_ptr = None
+            F_new = self.networks['g_p_R_mps_mps'][i].contract(release_workspace=True)
+            # self.networks['g_p_R_mps_mps'][i].workspace_ptr = None
             # F_new = contract('apb, cpd, bd->ac', A, B, F, options=options, optimize=o)
             
             right_networks[i-1] = F_new
@@ -448,8 +462,8 @@ class QI_CFD:
             else:
                 self.networks[f'g_p_L_mps_mpo{extra}'][i].reset_operands(A, W, B, F)
 
-            F_new = self.networks[f'g_p_L_mps_mpo{extra}'][i].contract()
-            self.networks[f'g_p_L_mps_mpo{extra}'][i].workspace_ptr = None
+            F_new = self.networks[f'g_p_L_mps_mpo{extra}'][i].contract(release_workspace=True)
+            # self.networks[f'g_p_L_mps_mpo{extra}'][i].workspace_ptr = None
             # F_new = contract('apb, lprP, cPd, alc->brd', A, W, B, F, options=options, optimize=o)
             
             left_networks[i+1] = F_new
@@ -467,8 +481,8 @@ class QI_CFD:
             else:
                 self.networks[f'g_p_R_mps_mpo{extra}'][i].reset_operands(A, W, B, F)
 
-            F_new = self.networks[f'g_p_R_mps_mpo{extra}'][i].contract()
-            self.networks[f'g_p_R_mps_mpo{extra}'][i].workspace_ptr = None
+            F_new = self.networks[f'g_p_R_mps_mpo{extra}'][i].contract(release_workspace=True)
+            # self.networks[f'g_p_R_mps_mpo{extra}'][i].workspace_ptr = None
             # F_new = contract('apb, lprP, cPd, brd->alc', A, W, B, F, options=options, optimize=o)
             
             right_networks[i-1] = F_new
@@ -501,8 +515,8 @@ class QI_CFD:
         else:
             self.networks[f'u_p_{LR}_mps_mps{extra}'][pos].reset_operands(*operands)
         
-        F_new = self.networks[f'u_p_{LR}_mps_mps{extra}'][pos].contract()
-        self.networks[f'u_p_{LR}_mps_mps{extra}'][pos].workspace_ptr = None
+        F_new = self.networks[f'u_p_{LR}_mps_mps{extra}'][pos].contract(release_workspace=True)
+        # self.networks[f'u_p_{LR}_mps_mps{extra}'][pos].workspace_ptr = None
         
         return F_new
 
@@ -536,8 +550,8 @@ class QI_CFD:
         else:
             self.networks[f'u_p_{LR}_mps_mpo{extra}'][pos].reset_operands(*operands)
         
-        F_new = self.networks[f'u_p_{LR}_mps_mpo{extra}'][pos].contract()
-        self.networks[f'u_p_{LR}_mps_mpo{extra}'][pos].workspace_ptr = None
+        F_new = self.networks[f'u_p_{LR}_mps_mpo{extra}'][pos].contract(release_workspace=True)
+        # self.networks[f'u_p_{LR}_mps_mpo{extra}'][pos].workspace_ptr = None
         
         return F_new
 
@@ -573,15 +587,15 @@ class QI_CFD:
             self.networks['cg_12'][pos].reset_operands(*operands_12)
             self.networks['cg_21'][pos].reset_operands(*operands_21)
         
-        Ax_1 -= self.networks['cg_d'][pos].contract() + self.networks['cg_12'][pos].contract()
-        Ax_2 -= self.networks['cg_21'][pos].contract()
+        Ax_1 -= self.networks['cg_d'][pos].contract() + self.networks['cg_12'][pos].contract(release_workspace=True)
+        Ax_2 -= self.networks['cg_21'][pos].contract(release_workspace=True)
 
         self.networks['cg_d'][pos].reset_operands(*operands_22)
-        Ax_2 -= self.networks['cg_d'][pos].contract()
+        Ax_2 -= self.networks['cg_d'][pos].contract(release_workspace=True)
 
-        self.networks['cg_d'][pos].workspace_ptr = None
-        self.networks['cg_12'][pos].workspace_ptr = None
-        self.networks['cg_21'][pos].workspace_ptr = None
+        # self.networks['cg_d'][pos].workspace_ptr = None
+        # self.networks['cg_12'][pos].workspace_ptr = None
+        # self.networks['cg_21'][pos].workspace_ptr = None
 
         return Ax_1, Ax_2
 
@@ -633,7 +647,7 @@ class QI_CFD:
             self.networks['residual'][pos].reset_operands(r_new_1, r_new_1)
             r_new_r_new = self.networks['residual'][pos].contract()
             self.networks['residual'][pos].reset_operands(r_new_2, r_new_2)
-            r_new_r_new += self.networks['residual'][pos].contract()
+            r_new_r_new += self.networks['residual'][pos].contract(release_workspace=True)
             beta = r_new_r_new / r_r
 
             p_1 = r_new_1 + beta * p_1
@@ -642,10 +656,7 @@ class QI_CFD:
             r_r = r_new_r_new
         
         # print(iter, r_r)
-        self.networks['residual'][pos].workspace_ptr = None
-
-        if self.meas_cg_iter:
-            self.cg_iter_data = (iter, float(r_r))
+        # self.networks['residual'][pos].workspace_ptr = None
 
         return x_1, x_2
 
@@ -711,8 +722,8 @@ class QI_CFD:
         else:
             self.networks[f'l_r_A_W{extra}'][pos].reset_operands(*operands)
 
-        tensor = self.networks[f'l_r_A_W{extra}'][pos].contract()
-        self.networks[f'l_r_A_W{extra}'][pos].workspace_ptr = None
+        tensor = self.networks[f'l_r_A_W{extra}'][pos].contract(release_workspace=True)
+        # self.networks[f'l_r_A_W{extra}'][pos].workspace_ptr = None
 
         return tensor
 
@@ -770,12 +781,12 @@ class QI_CFD:
         E_1_U = self.networks['norm'].contract()
         operands = [V[0], V[0]]
         self.networks['norm'].reset_operands(*operands)
-        E_1_V = self.networks['norm'].contract()
-        self.networks['norm'].workspace_ptr = None
+        E_1_V = self.networks['norm'].contract(release_workspace=True)
+        # self.networks['norm'].workspace_ptr = None
         E_1 = E_1_U + E_1_V
         
         run = 0
-        while np.abs((E_1-E_0)/E_0) > epsilon:      # do until the state does not change anymore
+        while np.abs((E_1-E_0)/E_0) > epsilon and run < self.max_sweeps:      # do until the state does not change anymore
             run += 1
 
             # sweep through MPS and optimize locally
@@ -808,8 +819,8 @@ class QI_CFD:
                 # b_2
                 operands = [V_Ay_left[i], Ay_MPS[i], V_Ay_right[i]]
                 self.networks['b'][i].reset_operands(*operands)
-                b_2 = self.networks['b'][i].contract()
-                self.networks['b'][i].workspace_ptr = None
+                b_2 = self.networks['b'][i].contract(release_workspace=True)
+                # self.networks['b'][i].workspace_ptr = None
                 # b_2 = contract('ud, upr, rD->dpD', V_Ay_left[i], Ay_MPS[i], V_Ay_right[i], options=options)
 
                 # convection-diffusion terms
@@ -895,8 +906,8 @@ class QI_CFD:
                 # b_2
                 operands = [V_Ay_left[i], Ay_MPS[i], V_Ay_right[i]]
                 self.networks['b'][i].reset_operands(*operands)
-                b_2 = self.networks['b'][i].contract()
-                self.networks['b'][i].workspace_ptr = None
+                b_2 = self.networks['b'][i].contract(release_workspace=True)
+                # self.networks['b'][i].workspace_ptr = None
                 # b_2 = contract('ud, upr, rD->dpD', V_Ay_left[i], Ay_MPS[i], V_Ay_right[i], options=options)
 
                 # convection-diffusion terms
@@ -975,13 +986,13 @@ class QI_CFD:
             E_1_U = self.networks['norm'].contract()
             operands = [V[0], V[0]]
             self.networks['norm'].reset_operands(*operands)
-            E_1_V = self.networks['norm'].contract()
-            self.networks['norm'].workspace_ptr = None
+            E_1_V = self.networks['norm'].contract(release_workspace=True)
+            # self.networks['norm'].workspace_ptr = None
             E_1 = E_1_U + E_1_V
             print(f"Run: {run}, Diff: {(E_1-E_0)/E_0}, E_0: {E_0}, E_1: {E_1}", end='\r')
         print(f"Run: {run}, Diff: {(E_1-E_0)/E_0}, E_0: {E_0}, E_1: {E_1}", end='\r')
         
-        return U, V
+        return self.copy_tn(U), self.copy_tn(V)
 
 
     def plot(self, U, V, time=-1, full=False, save_path=None, show=False):
@@ -1024,9 +1035,63 @@ class QI_CFD:
                 el.free()
 
 
+    def multiply_scalar_mps(self, scalar, mps):
+        mps[0] = mps[0]*scalar
+
+        return mps
+    
+    
+    def add_mps(self, mps_1, mps_2):
+        result_mps = []
+        
+        for i, (tensor_1, tensor_2) in enumerate(zip(mps_1, mps_2)):
+            l_1, p_1, r_1 = tensor_1.shape
+            l_2, p_2, r_2 = tensor_2.shape
+            if i == 0:
+                l = l_1
+                p = p_1
+                r = r_1 + r_2
+
+                new_tensor = cp.zeros((l, p, r), dtype=tensor_1.dtype)
+                new_tensor[:l_1, :, :r_1] = tensor_1
+                new_tensor[:l_1, :, r_1:] = tensor_2
+            elif i == len(mps_1)-1:
+                l = l_1 + l_2
+                p = p_1
+                r = r_1
+
+                new_tensor = cp.zeros((l, p, r), dtype=tensor_1.dtype)
+                new_tensor[:l_1, :, :r_1] = tensor_1
+                new_tensor[l_1:, :, :r_1] = tensor_2
+            else:
+                l = l_1 + l_2
+                p = p_1
+                r = r_1 + r_2
+                
+                new_tensor = cp.zeros((l, p, r), dtype=tensor_1.dtype)
+                new_tensor[:l_1, :, :r_1] = tensor_1
+                new_tensor[l_1:, :, r_1:] = tensor_2
+                
+            result_mps.append(new_tensor)
+        
+        return result_mps
+    
+
+    def add_mps_list(self, mps_list, coeff_list, chi):
+        curr_mps = self.copy_tn(mps_list[0])
+        curr_mps[0] *= coeff_list[0]
+        for i in range(1, len(mps_list)):
+            new_mps = self.copy_tn(mps_list[i])
+            new_mps[0] *= coeff_list[i]
+            curr_mps = self.add_mps(curr_mps, new_mps)
+            curr_mps = self.compress_mps(curr_mps, chi, curr_center=0, options=self.options)
+        
+        return curr_mps
+    
+
     # time evolution algorithm
     def time_evolution(self):
-        n_steps = int(np.ceil(self.T/self.dt))    # time steps
+        n_steps = int(np.ceil((self.T-self.t)/self.dt))    # time steps
         # finite difference operators with 8th order precision
         d1x = Diff_1_8_x_MPO(self.n_bits, self.dx, self.options)
         d1y = Diff_1_8_y_MPO(self.n_bits, self.dx, self.options)
@@ -1048,53 +1113,152 @@ class QI_CFD:
         U = self.canonical_center(self.U_init, 0, self.options)
         V = self.canonical_center(self.V_init, 0, self.options)
 
-        # initialize precontracted left and right networks
-        U_d1x_d1x_U_left, U_d1x_d1x_U_right = self.get_precontracted_LR_mps_mpo(U, d1x_d1x, U, 0, '_dd', self.options)
-        U_d1x_d1y_V_left, U_d1x_d1y_V_right = self.get_precontracted_LR_mps_mpo(U, d1x_d1y, V, 0, '_ddxy', self.options)
-        V_d1y_d1y_V_left, V_d1y_d1y_V_right = self.get_precontracted_LR_mps_mpo(V, d1y_d1y, V, 0, '_dd', self.options)
-
-        t = 0
+        # # initialize precontracted left and right networks
+        # U_d1x_d1x_U_left, U_d1x_d1x_U_right = self.get_precontracted_LR_mps_mpo(U, d1x_d1x, U, 0, '_dd', self.options)
+        # U_d1x_d1y_V_left, U_d1x_d1y_V_right = self.get_precontracted_LR_mps_mpo(U, d1x_d1y, V, 0, '_ddxy', self.options)
+        # V_d1y_d1y_V_left, V_d1y_d1y_V_right = self.get_precontracted_LR_mps_mpo(V, d1y_d1y, V, 0, '_dd', self.options)
+    
         comp_time = {}
-        cg_iter_data = {}
         print("Simulation begins!")
         for step in range(n_steps):   # for every time step dt
-            print(f"Step = {step} - Time = {t}", end='\n')
+            print(f"Step = {step} - Time = {self.t}", end='\n')
+            # if step%5 == 0:
+            #     self.plot(U, V, t, save_path=f"/raid/home/q556220/dev/TN_CFD/DJ_2D/cuTensorNet/RK4_DJ/images/{self.n_bits}_{self.chi}_{self.Re}/{t}.png")
             if self.path is not None and step%(int(n_steps/self.save_number)) == 0:
-                np.save(f"{self.path}/u_time_{round(t, 5)}.npy", np.array([el.get() for el in U], dtype=object))
-                np.save(f"{self.path}/v_time_{round(t, 5)}.npy", np.array([el.get() for el in V], dtype=object))
+                np.save(f"{self.path}/u_time_{round(self.t, 5)}.npy", np.array([el.get() for el in U], dtype=object))
+                np.save(f"{self.path}/v_time_{round(self.t, 5)}.npy", np.array([el.get() for el in V], dtype=object))
 
-            U_trial = U.copy()         # trial velocity state
-            V_trial = V.copy()         # trial velocity state
-
-            U_prev = U.copy()          # previous velocity state
-            V_prev = V.copy()          # previous velocity state
-
-            U_prev_copy = U.copy()          # previous velocity state
-            V_prev_copy = V.copy()          # previous velocity state
-
+            U_trial = self.copy_tn(U)         # trial velocity state
+            V_trial = self.copy_tn(V)         # trial velocity state
+            
             if self.meas_comp_time:
                 start = time.time()
-            # Midpoint RK-2 step
-            U_mid, V_mid = self.single_time_step(self.dt/2, U_trial, V_trial, U_prev, V_prev, U_prev_copy, V_prev_copy, d1x, d1y, d2x, d2y, d1x_d1x, d1x_d1y, d1y_d1y, U_d1x_d1x_U_left, U_d1x_d1x_U_right, U_d1x_d1y_V_left, U_d1x_d1y_V_right, V_d1y_d1y_V_left, V_d1y_d1y_V_right, options=self.options)
-            # Full RK-2 step
+
+            # # RK1
+            # U, V = self.single_time_step(self.dt, U_trial.copy(), V_trial.copy(), U.copy(), V.copy(), U.copy(), V.copy(), d1x, d1y, d2x, d2y, d1x_d1x, d1x_d1y, d1y_d1y, U_d1x_d1x_U_left, U_d1x_d1x_U_right, U_d1x_d1y_V_left, U_d1x_d1y_V_right, V_d1y_d1y_V_left, V_d1y_d1y_V_right, options=self.options)
+            
+            # # RK2
+            # # Midpoint step
+            # U_mid, V_mid = self.single_time_step(self.dt/2, U_trial.copy(), V_trial.copy(), U.copy(), V.copy(), U.copy(), V.copy(), d1x, d1y, d2x, d2y, d1x_d1x, d1x_d1y, d1y_d1y, U_d1x_d1x_U_left, U_d1x_d1x_U_right, U_d1x_d1y_V_left, U_d1x_d1y_V_right, V_d1y_d1y_V_left, V_d1y_d1y_V_right, options=self.options)
+            # # Full step
+            # print('')
+            # U, V = self.single_time_step(self.dt, U_trial.copy(), V_trial.copy(), U.copy(), V.copy(), U_mid, V_mid, d1x, d1y, d2x, d2y, d1x_d1x, d1x_d1y, d1y_d1y, U_d1x_d1x_U_left, U_d1x_d1x_U_right, U_d1x_d1y_V_left, U_d1x_d1y_V_right, V_d1y_d1y_V_left, V_d1y_d1y_V_right, options=self.options)
+
+
+            # initialize precontracted left and right networks
+            U_d1x_d1x_U_left, U_d1x_d1x_U_right = self.get_precontracted_LR_mps_mpo(U, d1x_d1x, U, 0, '_dd', self.options)
+            U_d1x_d1y_V_left, U_d1x_d1y_V_right = self.get_precontracted_LR_mps_mpo(U, d1x_d1y, V, 0, '_ddxy', self.options)
+            V_d1y_d1y_V_left, V_d1y_d1y_V_right = self.get_precontracted_LR_mps_mpo(V, d1y_d1y, V, 0, '_dd', self.options)
+    
+            # RK4
+            U1_x, U1_y = self.single_time_step(
+                self.dt/6, 
+                U_trial, 
+                V_trial, 
+                self.multiply_scalar_mps(0.25, self.copy_tn(U)), 
+                self.multiply_scalar_mps(0.25, self.copy_tn(V)), 
+                self.copy_tn(U), 
+                self.copy_tn(V),  
+                d1x, 
+                d1y, 
+                d2x, 
+                d2y, 
+                d1x_d1x, 
+                d1x_d1y, 
+                d1y_d1y, 
+                U_d1x_d1x_U_left, 
+                U_d1x_d1x_U_right, 
+                U_d1x_d1y_V_left, 
+                U_d1x_d1y_V_right, 
+                V_d1y_d1y_V_left, 
+                V_d1y_d1y_V_right, 
+                options=self.options
+                )
             print('')
-            U, V = self.single_time_step(self.dt, U_trial, V_trial, U_prev, V_prev, U_mid, V_mid, d1x, d1y, d2x, d2y, d1x_d1x, d1x_d1y, d1y_d1y, U_d1x_d1x_U_left, U_d1x_d1x_U_right, U_d1x_d1y_V_left, U_d1x_d1y_V_right, V_d1y_d1y_V_left, V_d1y_d1y_V_right, options=self.options)
-            # U, V = single_time_step(U_trial, V_trial, U_prev, V_prev, U_prev_copy, V_prev_copy, chi_mpo, dt, Re, mu, d1x, d1y, d2x, d2y, d1x_d1x, d1x_d1y, d1y_d1y, U_d1x_d1x_U_left, U_d1x_d1x_U_right, U_d1x_d1y_V_left, U_d1x_d1y_V_right, V_d1y_d1y_V_left, V_d1y_d1y_V_right, solver=solver, options=options)
-            print('\n')
+            U2_x, U2_y = self.single_time_step(
+                self.dt/3, 
+                U_trial, 
+                V_trial, 
+                self.multiply_scalar_mps(0.25, self.copy_tn(U)), 
+                self.multiply_scalar_mps(0.25, self.copy_tn(V)), 
+                self.add_mps_list([U1_x, U], [3, 0.25], chi=self.chi),
+                self.add_mps_list([U1_y, V], [3, 0.25], chi=self.chi),
+                d1x, 
+                d1y, 
+                d2x, 
+                d2y, 
+                d1x_d1x, 
+                d1x_d1y, 
+                d1y_d1y, 
+                U_d1x_d1x_U_left, 
+                U_d1x_d1x_U_right, 
+                U_d1x_d1y_V_left, 
+                U_d1x_d1y_V_right, 
+                V_d1y_d1y_V_left, 
+                V_d1y_d1y_V_right, 
+                options=self.options
+                )
+            print('')
+            U3_x, U3_y = self.single_time_step(
+                self.dt/3, 
+                U_trial, 
+                V_trial, 
+                self.multiply_scalar_mps(0.25, self.copy_tn(U)), 
+                self.multiply_scalar_mps(0.25, self.copy_tn(V)), 
+                self.add_mps_list([U2_x, U], [1.5, 5/8], chi=self.chi),
+                self.add_mps_list([U2_y, V], [1.5, 5/8], chi=self.chi),
+                d1x, 
+                d1y, 
+                d2x, 
+                d2y, 
+                d1x_d1x, 
+                d1x_d1y, 
+                d1y_d1y, 
+                U_d1x_d1x_U_left, 
+                U_d1x_d1x_U_right, 
+                U_d1x_d1y_V_left, 
+                U_d1x_d1y_V_right, 
+                V_d1y_d1y_V_left, 
+                V_d1y_d1y_V_right, 
+                options=self.options
+                )
+            print('')
+            U4_x, U4_y = self.single_time_step(
+                self.dt/6, 
+                U_trial, 
+                V_trial, 
+                self.multiply_scalar_mps(0.25, self.copy_tn(U)), 
+                self.multiply_scalar_mps(0.25, self.copy_tn(V)), 
+                self.add_mps_list([U3_x, U], [3, 0.25], chi=self.chi),
+                self.add_mps_list([U3_y, V], [3, 0.25], chi=self.chi),
+                d1x, 
+                d1y, 
+                d2x, 
+                d2y, 
+                d1x_d1x, 
+                d1x_d1y, 
+                d1y_d1y, 
+                U_d1x_d1x_U_left, 
+                U_d1x_d1x_U_right, 
+                U_d1x_d1y_V_left, 
+                U_d1x_d1y_V_right, 
+                V_d1y_d1y_V_left, 
+                V_d1y_d1y_V_right, 
+                options=self.options
+                )
+            print('')
+            U = self.add_mps_list([U1_x, U2_x, U3_x, U4_x], [1, 1, 1, 1], chi=self.chi)
+            V = self.add_mps_list([U1_y, U2_y, U3_y, U4_y], [1, 1, 1, 1], chi=self.chi)
+            
+            print('\n') 
             if self.meas_comp_time:
                 end = time.time()
-                comp_time[t] = end-start
+                comp_time[self.t] = end-start
 
                 with open(self.comp_time_path, "w") as outfile: 
                     json.dump(comp_time, outfile)
-            if self.meas_cg_iter:
-                cg_iter_data[t] = self.cg_iter_data
 
-                with open(self.cg_iter_path, "w") as outfile: 
-                    json.dump(cg_iter_data, outfile)
-            
-            t += self.dt
-            
+            self.t += self.dt
         
         # plot(U, V, time=t, save_path=f"{save_path}/final.png", show=False)
         # np.save(f"{save_path}/u_final.npy", np.array([el.get() for el in U], dtype=object))
@@ -1102,22 +1266,17 @@ class QI_CFD:
         
         self.free_networks(self.networks)
         self.networks.clear()
-
+    
 
     # extract occupied gpu memory
     def get_gpu_memory(self, gpu_id=0):
-        n_steps = int(np.ceil(self.T/self.dt))    # time steps
+
+        self.max_sweeps = 1
         # finite difference operators with 8th order precision
         d1x = Diff_1_8_x_MPO(self.n_bits, self.dx, self.options)
         d1y = Diff_1_8_y_MPO(self.n_bits, self.dx, self.options)
         d2x = Diff_2_8_x_MPO(self.n_bits, self.dx, self.options)
         d2y = Diff_2_8_y_MPO(self.n_bits, self.dx, self.options)
-
-        # finite difference operators with 2nd order precision 
-        # d1x = Diff_1_2_x_MPO(n, dx, options)
-        # d1y = Diff_1_2_y_MPO(n, dx, options)
-        # d2x = Diff_2_2_x_MPO(n, dx, options)
-        # d2y = Diff_2_2_y_MPO(n, dx, options)
 
         mult_algorithm = {'qr_method': False, 'svd_method': {'partition': 'V', 'max_extent': self.chi_mpo}} # 'rel_cutoff':1e-10, 
         d1x_d1x = self.multiply_mpo_mpo(d1x, d1x, mult_algorithm, self.options)
@@ -1133,24 +1292,46 @@ class QI_CFD:
         U_d1x_d1y_V_left, U_d1x_d1y_V_right = self.get_precontracted_LR_mps_mpo(U, d1x_d1y, V, 0, '_ddxy', self.options)
         V_d1y_d1y_V_left, V_d1y_d1y_V_right = self.get_precontracted_LR_mps_mpo(V, d1y_d1y, V, 0, '_dd', self.options)
 
-        U_trial = U.copy()         # trial velocity state
-        V_trial = V.copy()         # trial velocity state
+        U_trial = self.copy_tn(U)         # trial velocity state
+        V_trial = self.copy_tn(V)         # trial velocity state
 
-        U_prev = U.copy()          # previous velocity state
-        V_prev = V.copy()          # previous velocity state
-
-        U_prev_copy = U.copy()          # previous velocity state
-        V_prev_copy = V.copy()          # previous velocity state
-
-        if self.meas_comp_time:
-            start = time.time()
-        # Midpoint RK-2 step
-        U_mid, V_mid = self.single_time_step(self.dt/2, U_trial, V_trial, U_prev, V_prev, U_prev_copy, V_prev_copy, d1x, d1y, d2x, d2y, d1x_d1x, d1x_d1y, d1y_d1y, U_d1x_d1x_U_left, U_d1x_d1x_U_right, U_d1x_d1y_V_left, U_d1x_d1y_V_right, V_d1y_d1y_V_left, V_d1y_d1y_V_right, options=self.options)
-        # Full RK-2 step
+        # RK4
+        U1_x, U1_y = self.single_time_step(
+            self.dt/6, 
+            U_trial, 
+            V_trial, 
+            self.multiply_scalar_mps(0.25, self.copy_tn(U)), 
+            self.multiply_scalar_mps(0.25, self.copy_tn(V)), 
+            self.copy_tn(U), 
+            self.copy_tn(V),  
+            d1x, 
+            d1y, 
+            d2x, 
+            d2y, 
+            d1x_d1x, 
+            d1x_d1y, 
+            d1y_d1y, 
+            U_d1x_d1x_U_left, 
+            U_d1x_d1x_U_right, 
+            U_d1x_d1y_V_left, 
+            U_d1x_d1y_V_right, 
+            V_d1y_d1y_V_left, 
+            V_d1y_d1y_V_right, 
+            options=self.options
+            )
         print('')
-        U, V = self.single_time_step(self.dt, U_trial, V_trial, U_prev, V_prev, U_mid, V_mid, d1x, d1y, d2x, d2y, d1x_d1x, d1x_d1y, d1y_d1y, U_d1x_d1x_U_left, U_d1x_d1x_U_right, U_d1x_d1y_V_left, U_d1x_d1y_V_right, V_d1y_d1y_V_left, V_d1y_d1y_V_right, options=self.options)
-        # U, V = single_time_step(U_trial, V_trial, U_prev, V_prev, U_prev_copy, V_prev_copy, chi_mpo, dt, Re, mu, d1x, d1y, d2x, d2y, d1x_d1x, d1x_d1y, d1y_d1y, U_d1x_d1x_U_left, U_d1x_d1x_U_right, U_d1x_d1y_V_left, U_d1x_d1y_V_right, V_d1y_d1y_V_left, V_d1y_d1y_V_right, solver=solver, options=options)
-        print('\n')
+        U2_x = self.copy_tn(U1_x)
+        U2_y = self.copy_tn(U1_x)
+        U3_x = self.copy_tn(U1_x)
+        U3_y = self.copy_tn(U1_x)
+        U4_x = self.copy_tn(U1_x)
+        U4_y = self.copy_tn(U1_x)
+        
+        U = self.add_mps_list([U1_x, U2_x, U3_x, U4_x], [1, 1, 1, 1], chi=self.chi)
+        V = self.add_mps_list([U1_y, U2_y, U3_y, U4_y], [1, 1, 1, 1], chi=self.chi)
+        
+        print('\n') 
+
 
         gpu_mem = float(get_gpu_memory()[gpu_id])
         
@@ -1180,6 +1361,44 @@ class QI_CFD:
         self.V_init = MPS_V_cupy
 
         print("Initialized Fields")
+    
+
+    def build_dummy_fields(self):
+        # Generate initial fields
+        MPS_U_cupy = []
+        MPS_V_cupy = []
+
+        def left(pos, dim, n):
+            if pos <= int(n/2):
+                return (2**dim)**pos
+            else:
+                return (2**dim)**(n-pos)
+        
+        def right(pos, dim, n):
+            if pos < int(n/2):
+                return (2**dim)**(pos+1)
+            else:
+                return (2**dim)**(n-pos-1)
+        
+        def left_right(pos, dim, n, chi):
+            l = left(pos, dim, n)
+            if l > chi:
+                l = chi
+            r = right(pos, dim, n)
+            if r > chi:
+                r = chi
+            
+            return l, r
+
+        for i in range(self.n_bits):
+            l, r = left_right(i, 2, self.n_bits, self.chi)
+            MPS_U_cupy.append(cp.random.random((l, 2**2, r)))
+            MPS_V_cupy.append(cp.random.random((l, 2**2, r)))
+
+        self.U_init = MPS_U_cupy
+        self.V_init = MPS_V_cupy
+
+        print("Initialized Dummy Fields")
 
     
     def set_initial_fields(self, U, V, u_max=1):
@@ -1199,3 +1418,15 @@ class QI_CFD:
         self.V_init = MPS_V_cupy
 
         print("Initialized Fields")
+
+    
+    def set_initial_MPSs(self, u_mps, v_mps, t=0):
+        # Rescale into non-dimensional units
+
+        self.U_init = [cp.asarray(tensor) for tensor in u_mps]
+        self.V_init = [cp.asarray(tensor) for tensor in v_mps]
+        self.t = t
+
+        print("Initialized Fields")
+
+    

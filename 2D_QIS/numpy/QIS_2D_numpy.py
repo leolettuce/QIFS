@@ -12,7 +12,7 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 
-# All functions relevant for the simulation of the 2D TDJ problem with MPS
+# This file is restricted to RK2 time stepping
 import numpy as np
 from scipy.sparse.linalg import cg
 import matplotlib.pyplot as plt
@@ -135,7 +135,7 @@ def shift_canonical_center(mps, center, initial=None):
         return mps
 
 
-# Initial conditions for TDJ
+# Initial conditions for DJ
 def J(X, Y, u_0, y_min=0.4, y_max=0.6, h = 0.005):
     return u_0/2*(np.tanh((Y-y_min)/h)-np.tanh((Y-y_max)/h)-1), np.zeros_like(Y)
 
@@ -156,7 +156,7 @@ def D(X, Y, u_0, y_min, y_max, h, L_box):
 
 
 def initial_fields(L, N, y_min, y_max, h, u_max):
-    # generate fields according to the initial conditions of the 2TDJ problem
+    # generate fields according to the initial conditions of the DJ problem
     dx = L/(N-1)    # dx=dy
 
     # create 2D grid
@@ -164,7 +164,7 @@ def initial_fields(L, N, y_min, y_max, h, u_max):
     y = np.linspace(0, L-dx, N)
     Y, X = np.meshgrid(y, x)
 
-    # load initial conditions for TDJ
+    # load initial conditions for DJ
     U, V = J(X, Y, u_max, y_min, y_max, h)
     dU, dV = D(X, Y, u_max, y_min, y_max, h, L)
     U = U + dU

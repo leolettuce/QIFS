@@ -139,9 +139,9 @@ def solveNS(u, v, Kx, Ky, Re, dt, dx):
 
     # RK4
     a = [1/6, 1/3, 1/3, 1/6]
-    b = [1/2, 1/2, 1, 1]
+    b = [1/2, 1/2, 1, 0]
 
-    for rk in range(2):
+    for rk in range(4):
         du_con, dv_con = convection(u, v, dt, dx)
         du_dif, dv_dif = diffusion(u, v, Re, dt, dx)
 
@@ -150,7 +150,7 @@ def solveNS(u, v, Kx, Ky, Re, dt, dx):
 
         du, dv = project(du, dv, Kx, Ky)
 
-        if rk < 1: 
+        if rk < 3: 
             u = u_old + b[rk]*du
             v = v_old + b[rk]*dv
         

@@ -19,7 +19,7 @@ import time, pickle
 n_bits = np.array([5, 6, 7, 8, 9, 10, 11, 12])
 N = 2**n_bits
 L = 1
-chi_list = [4, 8, 16, 32, 64]
+chi_list = [64]
 # chi_mpo = 16
 
 # Set timesteps
@@ -42,10 +42,7 @@ data = {}
 def main():
     for chi in chi_list:
         for i, n in enumerate(n_bits):
-            if chi < 32:
-                chi_mpo = 32
-            else: 
-                chi_mpo = chi
+            chi_mpo = chi
             U_MPS, V_MPS, U_arrays, V_arrays = build_initial_fields(n, L, chi)
             start = time.time()
             time_evolution(U_MPS, V_MPS, chi_mpo, dt[i], T[i], Re, mu, path, solver=solver)
