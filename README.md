@@ -1,6 +1,6 @@
 # QIFS - Quantum-Inspired Fluid Simulations
 CFD simulations using Tensor Network encoding.
-This repository contains the implementations of the Quantum-Inspired CFD Algorithm of the paper: https://arxiv.org/abs/2406.17823
+This repository contains the implementations of the Quantum-Inspired CFD Algorithm of the paper: https://doi.org/10.1103/PhysRevResearch.7.013112
 (arXiv link: https://arxiv.org/abs/2406.17823)
 
 The algorithm was introduced in this paper by Gourianov et al.:
